@@ -65,7 +65,7 @@
 
 - (NSString *)capitalized:(NSString *)key {
     if (key.length == 0) return key;
-    return [[key substringToIndex:1] uppercaseString] stringByAppendingString:[key substringFromIndex:1]];
+    return [NSString stringWithFormat:@"%@%@", [key substringToIndex:1].uppercaseString, [key substringFromIndex:1]];
 }
 
 // ---------- 大小滑杆（键名: portraitW / portraitH / landscapeW / landscapeH） ----------

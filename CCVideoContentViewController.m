@@ -10,6 +10,7 @@
 @property (nonatomic, strong) UILabel *placeholderLabel;
 @property (nonatomic, copy, nullable) NSString *loadedVideoName;
 @property (nonatomic, assign) BOOL wantsPlayback;
+- (void)settingsChanged;
 @end
 
 static void ccv_darwin_callback(CFNotificationCenterRef center, void *observer,
@@ -57,7 +58,7 @@ static void ccv_darwin_callback(CFNotificationCenterRef center, void *observer,
 
 - (void)dealloc {
     CFNotificationCenterRemoveEveryObserver(CFNotificationCenterGetDarwinNotifyCenter(), (__bridge const void *)(self));
-    [_looper disable];
+    [_looper disableLooping];
 }
 
 - (AVQueuePlayer *)player {
@@ -79,7 +80,7 @@ static void ccv_darwin_callback(CFNotificationCenterRef center, void *observer,
     if ([name isEqualToString:self.loadedVideoName ?: @""]) return;
     self.loadedVideoName = name;
 
-    [self.looper disable];
+    [self.looper disableLooping];
     self.looper = nil;
     [self.player removeAllItems];
 

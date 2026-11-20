@@ -40,7 +40,7 @@ static NSString * const CCVCellID = @"CCVVideoCell";
         _nameLabel.font = [UIFont systemFontOfSize:9];
         _nameLabel.textColor = [UIColor colorWithWhite:0.35 alpha:1.0];
         _nameLabel.textAlignment = NSTextAlignmentCenter;
-        _nameLabel.lineBreakMode = NSLineBreakByMiddleTruncation;
+        _nameLabel.lineBreakMode = (NSLineBreakMode)UILineBreakModeMiddleTruncation;
         [self.contentView addSubview:_nameLabel];
 
         _dotView = [[UIView alloc] initWithFrame:CGRectZero];
@@ -233,7 +233,8 @@ static NSString * const CCVCellID = @"CCVVideoCell";
     if (ext.length == 0) ext = @"mp4";
     NSString *base = suggestedName.length ? suggestedName : @"导入视频";
     // 清理文件名里的非法字符
-    base = [[base componentsSeparatedByCharactersInSet:[[NSCharacterSet characterSetWithCharactersInString:@"/\\:?%*|\"<>"] componentsJoinedByString:@""]] componentsJoinedByString:@""];
+    NSCharacterSet *badChars = [NSCharacterSet characterSetWithCharactersInString:@"/\\:?%*|\"<>"];
+    base = [[base componentsSeparatedByCharactersInSet:badChars] componentsJoinedByString:@""];
 
     NSString *dest = nil;
     for (int i = 0; i < 100; i++) {
