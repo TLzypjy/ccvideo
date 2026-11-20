@@ -1,0 +1,36 @@
+name: Build Tweak (rootless + roothide)
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Theos (roothide fork)
+        run: |
+          bash -c "$(curl -fsSL https://raw.githubusercontent.com/roothide/theos/master/bin/install-theos)"
+
+      - name: Build rootless (Dopamine 无根)
+        run: |
+          export THEOS=$HOME/theos
+          export DISABLE_ROOTLESS_COMPAT_WARNING=1
+          make clean package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless
+
+      - name: Build roothide (隐根)
+        run: |
+          export THEOS=$HOME/theos
+          export DISABLE_ROOTLESS_COMPAT_WARNING=1
+          make clean package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=roothide
+
+      - name: Upload debs
+        uses: actions/upload-artifact@v4
+        with:
+          name: ccvideo-debs
+          path: packages/*.deb
+          if-no-files-found: error
