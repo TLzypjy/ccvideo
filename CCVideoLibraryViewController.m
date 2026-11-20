@@ -40,7 +40,7 @@ static NSString * const CCVCellID = @"CCVVideoCell";
         _nameLabel.font = [UIFont systemFontOfSize:9];
         _nameLabel.textColor = [UIColor colorWithWhite:0.35 alpha:1.0];
         _nameLabel.textAlignment = NSTextAlignmentCenter;
-        _nameLabel.lineBreakMode = (NSLineBreakMode)UILineBreakModeMiddleTruncation;
+        _nameLabel.lineBreakMode = (NSLineBreakMode)5; // NSLineBreakByTruncatingMiddle
         [self.contentView addSubview:_nameLabel];
 
         _dotView = [[UIView alloc] initWithFrame:CGRectZero];
