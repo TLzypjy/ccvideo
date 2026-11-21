@@ -60,7 +60,9 @@
     [s setProperty:other forKey:@"otherKey"];            // setter 里同步写另一方向
     // leftImage 必须是 UIImage 对象（传图片名字符串会让 UISlider setMinimumValueImage: 崩溃）
     NSString *dirIcon = [key isEqualToString:CCVKeyPortraitW] ? @"X" : @"Y";
-    UIImage *dirImg = [[NSBundle bundleForClass:[self class]] imageForResource:dirIcon];
+    UIImage *dirImg = nil;
+    NSString *iconPath = [[NSBundle bundleForClass:[self class]] pathForResource:dirIcon ofType:@"png"];
+    if (iconPath) dirImg = [UIImage imageWithContentsOfFile:iconPath];
     if (dirImg) [s setProperty:dirImg forKey:@"leftImage"];
     return s;
 }
