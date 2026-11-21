@@ -4,18 +4,19 @@
 #import <Preferences/PSSpecifier.h>
 #import <Preferences/PSTableCell.h>
 
-#pragma mark - 自定义四挡位尺寸滑杆 Cell
+#pragma mark - 「模块尺寸」卡片 Cell（标题 + 横向/竖向两条四挡滑杆）
 
-@interface CCVSizeSliderCell : PSTableCell
+@interface CCVSizeCardCell : PSTableCell
 @end
 
-@implementation CCVSizeSliderCell {
+@implementation CCVSizeCardCell {
     UILabel *_titleLabel;
-    UILabel *_valueLabel;
-    UISlider *_slider;
-    NSMutableArray<UIView *> *_tickDots;
-    NSString *_sizeKey;
-    NSInteger _lastSnapped;
+    NSArray<UISlider *> *_sliders;                       // 0=横向宽度 1=竖向高度
+    NSArray<UILabel *> *_valueLabels;
+    NSArray<NSArray<UIView *> *> *_dots;                 // 每条滑杆 4 个刻度点
+    NSArray<NSString *> *_keys;
+    NSArray<NSString *> *_otherKeys;                     // 同步写入的另一方向键
+    NSInteger _lastSnapped[2];
     BOOL _didSetup;
 }
 
@@ -25,7 +26,7 @@
     return self;
 }
 
-// 兼容部分 PSListController 路径：转发到已声明的初始化器，避免 super 未实现该选择器
+// 兼容 PSListController 可能走的初始化路径
 - (instancetype)initWithSpecifier:(PSSpecifier *)specifier {
     return [self initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil specifier:specifier];
 }
@@ -34,114 +35,129 @@
     if (_didSetup) return;
     _didSetup = YES;
 
-    PSSpecifier *spec = self.specifier;
-    _sizeKey = [spec propertyForKey:@"key"] ?: CCVKeyPortraitW;
-
     self.selectionStyle = UITableViewCellSelectionStyleNone;
     self.backgroundColor = UIColor.clearColor;
     self.contentView.backgroundColor = UIColor.clearColor;
 
+    _keys = @[CCVKeyPortraitW, CCVKeyPortraitH];
+    _otherKeys = @[CCVKeyLandscapeW, CCVKeyLandscapeH];
+
     _titleLabel = [[UILabel alloc] init];
-    _titleLabel.font = [UIFont systemFontOfSize:13];
-    _titleLabel.textColor = [UIColor secondaryLabelColor];
-    _titleLabel.text = spec.name ?: @"";
+    _titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+    _titleLabel.textColor = [UIColor labelColor];
+    _titleLabel.text = @"模块尺寸";
     [self.contentView addSubview:_titleLabel];
 
-    _valueLabel = [[UILabel alloc] init];
-    _valueLabel.font = [UIFont systemFontOfSize:15];
-    _valueLabel.textColor = [UIColor labelColor];
-    _valueLabel.textAlignment = NSTextAlignmentRight;
-    [self.contentView addSubview:_valueLabel];
+    NSMutableArray *sliders = [NSMutableArray array];
+    NSMutableArray *labels = [NSMutableArray array];
+    NSMutableArray *dotGroups = [NSMutableArray array];
 
-    _slider = [[UISlider alloc] init];
-    _slider.minimumValue = 1;
-    _slider.maximumValue = 4;
-    _slider.continuous = YES;
-    _slider.minimumTrackTintColor = [UIColor systemGrayColor];
-    _slider.maximumTrackTintColor = [UIColor systemGrayColor];
-    _slider.value = [self ccvCurrent];
-    [_slider addTarget:self action:@selector(ccvSliderChanged:) forControlEvents:UIControlEventValueChanged];
-    [self.contentView addSubview:_slider];
+    for (int i = 0; i < 2; i++) {
+        UILabel *v = [[UILabel alloc] init];
+        v.font = [UIFont systemFontOfSize:15];
+        v.textColor = [UIColor labelColor];
+        v.textAlignment = NSTextAlignmentRight;
+        [self.contentView addSubview:v];
+        [labels addObject:v];
 
-    _tickDots = [NSMutableArray array];
-    for (int i = 0; i < 4; i++) {
-        UIView *dot = [[UIView alloc] init];
-        dot.layer.cornerRadius = 2;
-        dot.backgroundColor = [UIColor systemGray2Color];
-        dot.userInteractionEnabled = NO;
-        [_tickDots addObject:dot];
-        [self.contentView addSubview:dot];
+        UISlider *s = [[UISlider alloc] init];
+        s.tag = i;
+        s.minimumValue = 1;
+        s.maximumValue = 4;
+        s.continuous = YES;
+        s.minimumTrackTintColor = [UIColor systemGrayColor];
+        s.maximumTrackTintColor = [UIColor systemGrayColor];
+        s.value = [self ccvCurrentForKey:_keys[i]];
+        [s addTarget:self action:@selector(ccvSliderChanged:) forControlEvents:UIControlEventValueChanged];
+        [self.contentView addSubview:s];
+        [sliders addObject:s];
+
+        NSMutableArray *dots = [NSMutableArray array];
+        for (int j = 0; j < 4; j++) {
+            UIView *dot = [[UIView alloc] init];
+            dot.layer.cornerRadius = 2;
+            dot.backgroundColor = [UIColor systemGray2Color];
+            dot.userInteractionEnabled = NO;
+            [self.contentView addSubview:dot];
+            [dots addObject:dot];
+        }
+        [dotGroups addObject:dots];
+
+        _lastSnapped[i] = (NSInteger)lroundf(s.value);
+        v.text = [NSString stringWithFormat:@"%.2f", s.value];
     }
 
-    _lastSnapped = (NSInteger)lroundf(_slider.value);
-    _valueLabel.text = [NSString stringWithFormat:@"%.2f", _slider.value];
+    _sliders = sliders;
+    _valueLabels = labels;
+    _dots = dotGroups;
 }
 
-- (float)ccvCurrent {
-    NSInteger v = [CCVPrefs() integerForKey:_sizeKey];
+- (float)ccvCurrentForKey:(NSString *)key {
+    NSInteger v = [CCVPrefs() integerForKey:key];
     if (v <= 0) v = 2;
     return (float)MIN(MAX(v, (NSInteger)1), (NSInteger)4);
 }
 
-- (void)ccvSliderChanged:(UISlider *)slider {
-    NSInteger snapped = (NSInteger)lroundf(slider.value);
+- (void)ccvSliderChanged:(UISlider *)sender {
+    NSInteger idx = sender.tag;
+    NSInteger snapped = (NSInteger)lroundf(sender.value);
     snapped = MIN(MAX(snapped, (NSInteger)1), (NSInteger)4);
-    BOOL stepped = (snapped != _lastSnapped);
-    _lastSnapped = snapped;
+    BOOL stepped = (snapped != _lastSnapped[idx]);
+    _lastSnapped[idx] = snapped;
 
-    if ((float)snapped != slider.value) slider.value = (float)snapped; // 吸附挡位
-    _valueLabel.text = [NSString stringWithFormat:@"%.2f", (float)snapped];
+    if ((float)snapped != sender.value) sender.value = (float)snapped; // 吸附挡位
+    _valueLabels[idx].text = [NSString stringWithFormat:@"%.2f", (float)snapped];
 
-    if (stepped) { // 换挡时轻微触感反馈
+    if (stepped) { // 换挡触感反馈
         UISelectionFeedbackGenerator *gen = [[UISelectionFeedbackGenerator alloc] init];
         [gen selectionChanged];
     }
 
     // 横/竖屏共用同一组尺寸：同步写入对应方向键
-    NSString *other = [_sizeKey isEqualToString:CCVKeyPortraitW] ? CCVKeyLandscapeW : CCVKeyLandscapeH;
-    [CCVPrefs() setInteger:snapped forKey:_sizeKey];
-    [CCVPrefs() setInteger:snapped forKey:other];
+    [CCVPrefs() setInteger:snapped forKey:_keys[idx]];
+    [CCVPrefs() setInteger:snapped forKey:_otherKeys[idx]];
     CCVPostSizeChange();
 }
 
 - (void)refreshCellContentsWithSpecifier:(PSSpecifier *)specifier {
     [super refreshCellContentsWithSpecifier:specifier];
     if (!_didSetup) { [self ccvSetup]; return; }
-    _sizeKey = [self.specifier propertyForKey:@"key"] ?: _sizeKey;
-    _titleLabel.text = self.specifier.name ?: @"";
-    float v = [self ccvCurrent];
-    _slider.value = v;
-    _lastSnapped = (NSInteger)lroundf(v);
-    _valueLabel.text = [NSString stringWithFormat:@"%.2f", v];
+    for (int i = 0; i < 2; i++) {
+        float v = [self ccvCurrentForKey:_keys[i]];
+        _sliders[i].value = v;
+        _lastSnapped[i] = (NSInteger)lroundf(v);
+        _valueLabels[i].text = [NSString stringWithFormat:@"%.2f", v];
+    }
 }
 
 - (void)layoutSubviews {
     [super layoutSubviews];
     CGRect b = self.contentView.bounds;
     CGFloat padX = 20;
-    CGFloat titleY = 9, titleH = 16;
-    _titleLabel.frame = CGRectMake(padX, titleY, b.size.width - padX * 2, titleH);
+    CGFloat w = b.size.width;
+    _titleLabel.frame = CGRectMake(padX, 12, w - padX * 2, 18);
 
-    CGFloat sliderY = titleY + titleH + 4;
+    CGFloat valueW = 50;
+    CGFloat sliderW = w - padX * 2 - valueW - 10;
+    CGFloat ys[2] = {42, 84};
     CGFloat sliderH = 31;
-    CGFloat valueW = 52;
-    CGFloat sliderW = b.size.width - padX * 2 - valueW - 8;
-    _slider.frame = CGRectMake(padX, sliderY, sliderW, sliderH);
-    _valueLabel.frame = CGRectMake(b.size.width - padX - valueW, sliderY, valueW, sliderH);
 
     CGFloat thumbInset = 9; // 拇指半径近似，刻度贴着轨道两端
-    CGFloat x0 = padX + thumbInset;
-    CGFloat span = sliderW - thumbInset * 2;
-    CGFloat cy = sliderY + sliderH / 2.0;
-    for (int i = 0; i < 4; i++) {
-        CGFloat t = i / 3.0;
-        UIView *dot = _tickDots[i];
-        dot.frame = CGRectMake(x0 + t * span - 2, cy - 2, 4, 4);
+    for (int i = 0; i < 2; i++) {
+        UISlider *s = _sliders[i];
+        s.frame = CGRectMake(padX, ys[i], sliderW, sliderH);
+        UILabel *v = _valueLabels[i];
+        v.frame = CGRectMake(padX + sliderW + 10, ys[i], valueW, sliderH);
+
+        CGFloat x0 = padX + thumbInset;
+        CGFloat span = sliderW - thumbInset * 2;
+        CGFloat cy = ys[i] + sliderH / 2.0;
+        for (int j = 0; j < 4; j++) {
+            UIView *dot = _dots[i][j];
+            dot.frame = CGRectMake(x0 + (j / 3.0) * span - 2, cy - 2, 4, 4);
+        }
     }
 }
-
-+ (CGFloat)preferredHeightForSpecifier:(PSSpecifier *)specifier { return 72; }
-- (CGFloat)preferredHeightForSpecifier:(PSSpecifier *)specifier { return 72; }
 
 @end
 
@@ -167,12 +183,20 @@
         lib.buttonAction = @selector(openLibrary:);
         [specs addObject:lib];
 
+        // 模块尺寸：单张卡片 cell（无外部小节标题）
         PSSpecifier *g2 = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:nil get:nil detail:nil cell:PSGroupCell edit:nil];
-        [g2 setProperty:@"模块尺寸" forKey:@"headerTitle"];
         [g2 setProperty:@"横向 / 竖向各 4 个挡位（1~4 格）。拖动换挡后即时生效，无需注销。" forKey:@"footerTitle"];
         [specs addObject:g2];
-        [specs addObject:[self sizeSliderNamed:@"横向宽度" key:CCVKeyPortraitW]];
-        [specs addObject:[self sizeSliderNamed:@"竖向高度" key:CCVKeyPortraitH]];
+
+        PSSpecifier *card = [PSSpecifier preferenceSpecifierNamed:@"模块尺寸"
+                                                           target:self
+                                                             set:nil
+                                                              get:nil
+                                                           detail:nil
+                                                             cell:PSSliderCell
+                                                              edit:nil];
+        [card setProperty:[CCVSizeCardCell class] forKey:@"cellClass"];
+        [specs addObject:card];
 
         PSSpecifier *g4 = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:nil get:nil detail:nil cell:PSGroupCell edit:nil];
         [g4 setProperty:@"播放" forKey:@"headerTitle"];
@@ -187,17 +211,14 @@
     return _specifiers;
 }
 
-- (PSSpecifier *)sizeSliderNamed:(NSString *)name key:(NSString *)key {
-    PSSpecifier *s = [PSSpecifier preferenceSpecifierNamed:name
-                                                    target:self
-                                                      set:nil
-                                                       get:nil
-                                                    detail:nil
-                                                      cell:PSSliderCell
-                                                       edit:nil];
-    [s setProperty:[CCVSizeSliderCell class] forKey:@"cellClass"];
-    [s setProperty:key forKey:@"key"];
-    return s;
+// 行高自己接管：卡片 cell 固定 130pt，其余走默认逻辑
+- (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
+    NSArray *specs = [self specifiers];
+    if (indexPath.row < (NSInteger)specs.count) {
+        PSSpecifier *spec = [specs objectAtIndex:indexPath.row];
+        if ([[spec propertyForKey:@"cellClass"] isEqual:[CCVSizeCardCell class]]) return 130;
+    }
+    return [super tableView:tableView heightForRowAtIndexPath:indexPath];
 }
 
 // ---------- 画面填充开关 ----------
