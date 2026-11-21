@@ -58,7 +58,10 @@
     [s setProperty:@3 forKey:@"segmentCount"];
     [s setProperty:@YES forKey:@"showValue"];    // 右侧显示数值
     [s setProperty:other forKey:@"otherKey"];            // setter 里同步写另一方向
-    [s setProperty:[key isEqualToString:CCVKeyPortraitW] ? @"X" : @"Y" forKey:@"leftImage"]; // 滑杆左侧方向标识
+    // leftImage 必须是 UIImage 对象（传图片名字符串会让 UISlider setMinimumValueImage: 崩溃）
+    NSString *dirIcon = [key isEqualToString:CCVKeyPortraitW] ? @"X" : @"Y";
+    UIImage *dirImg = [[NSBundle bundleForClass:[self class]] imageForResource:dirIcon];
+    if (dirImg) [s setProperty:dirImg forKey:@"leftImage"];
     return s;
 }
 
