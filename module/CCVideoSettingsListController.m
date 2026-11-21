@@ -13,8 +13,7 @@
     if (!_specifiers) {
         NSMutableArray *specs = [NSMutableArray array];
 
-        PSSpecifier *g1 = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:nil get:nil detail:nil cell:PSGroupCell edit:nil];
-        [g1 setProperty:@"视频素材" forKey:@"headerTitle"];
+        PSSpecifier *g1 = [PSSpecifier preferenceSpecifierNamed:@"视频素材" target:self set:nil get:nil detail:nil cell:PSGroupCell edit:nil];
         [g1 setProperty:@"视频会静音循环播放。进入素材库可从相册导入视频、点选或长按删除。" forKey:@"footerTitle"];
         [specs addObject:g1];
 
@@ -23,15 +22,13 @@
         [specs addObject:lib];
 
         // 模块尺寸：原生分段滑杆（4 挡 + 数值显示），横/竖屏共用
-        PSSpecifier *g2 = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:nil get:nil detail:nil cell:PSGroupCell edit:nil];
-        [g2 setProperty:@"模块尺寸" forKey:@"headerTitle"];
-        [g2 setProperty:@"横向 / 竖向各 4 个挡位（1~4 格）。换挡后即时生效，无需注销。" forKey:@"footerTitle"];
+        PSSpecifier *g2 = [PSSpecifier preferenceSpecifierNamed:@"模块尺寸" target:self set:nil get:nil detail:nil cell:PSGroupCell edit:nil];
+        [g2 setProperty:@"X=横向 / Y=竖向，各 4 挡（1~4 格）。换挡即时生效，无需注销。" forKey:@"footerTitle"];
         [specs addObject:g2];
-        [specs addObject:[self sliderNamed:@"横向宽度" key:CCVKeyPortraitW other:CCVKeyLandscapeW]];
-        [specs addObject:[self sliderNamed:@"竖向高度" key:CCVKeyPortraitH other:CCVKeyLandscapeH]];
+        [specs addObject:[self sliderNamed:@"X" key:CCVKeyPortraitW other:CCVKeyLandscapeW]];
+        [specs addObject:[self sliderNamed:@"Y" key:CCVKeyPortraitH other:CCVKeyLandscapeH]];
 
-        PSSpecifier *g4 = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:nil get:nil detail:nil cell:PSGroupCell edit:nil];
-        [g4 setProperty:@"播放" forKey:@"headerTitle"];
+        PSSpecifier *g4 = [PSSpecifier preferenceSpecifierNamed:@"播放" target:self set:nil get:nil detail:nil cell:PSGroupCell edit:nil];
         [g4 setProperty:@"画面填充：铺满模块（可能裁切）；关闭则完整显示（可能留黑边）。修改尺寸与选择视频即时生效，无需注销。" forKey:@"footerTitle"];
         [specs addObject:g4];
 
@@ -58,9 +55,10 @@
     [s setProperty:@4 forKey:@"max"];
     [s setProperty:@2 forKey:@"defaultValue"];
     [s setProperty:@YES forKey:@"isSegmented"];     // 4 个刻度挡位
-    [s setProperty:@4 forKey:@"segmentCount"];
+    [s setProperty:@3 forKey:@"segmentCount"];
     [s setProperty:@YES forKey:@"showValue"];    // 右侧显示数值
     [s setProperty:other forKey:@"otherKey"];            // setter 里同步写另一方向
+    [s setProperty:[key isEqualToString:CCVKeyPortraitW] ? @"X" : @"Y" forKey:@"leftImage"]; // 滑杆左侧方向标识
     return s;
 }
 
