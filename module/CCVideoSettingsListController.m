@@ -104,16 +104,9 @@
         self.textLabel.hidden = YES;
         if (self.detailTextLabel) self.detailTextLabel.hidden = YES;
 
-        // 不透明卡片背景（跟随深浅色）
-        UIView *card = [[UIView alloc] init];
-        card.backgroundColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *t) {
-            return t.userInterfaceStyle == UIUserInterfaceStyleDark
-                ? [UIColor colorWithWhite:0.11 alpha:1.0]
-                : [UIColor whiteColor];
-        }];
-        card.layer.cornerRadius = 22;
-        card.userInteractionEnabled = NO;
-        self.backgroundView = card;
+        // 透明行背景（与滑杆行一致，跟随主题页面背景；不再用白色圆角卡片）
+        self.backgroundView = nil;
+        self.backgroundColor = [UIColor clearColor];
 
         [self ccvSetupSubviews];
         [self applySpecifierStyle];
@@ -221,11 +214,49 @@
 @end
 
 // ---------- 主页：模块列表 + 创建模块 ----------
+@interface CCVideoSettingsListController () <UIGestureRecognizerDelegate>
+@property (nonatomic, assign) NSTimeInterval ccvLastCreateAt; // 创建防抖（cell 点击与兜底手势可能双触发）
+@end
+
 @implementation CCVideoSettingsListController
 
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = @"视频模块";
+
+    // 兜底点击手势：实测连续多次 reloadSpecifiers 后，cell 内的点击区可能收不到触摸
+    // （表现为"连续创建 3 个后第 4 次点创建没反应"，滚动一下才恢复）。手势挂在根视图上，
+    // 根视图内任何后代（cell、页脚、游离视图）收到的触摸它都能感知，绕开 cell 触摸链。
+    // cancelsTouchesInView=NO 不影响滑杆/开关/分段按钮；模块行/创建行可能与 cell 点击
+    // 双触发——openModule 有去重，createModule 有防抖。
+    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(fallbackTap:)];
+    tap.cancelsTouchesInView = NO;
+    tap.delegate = self;
+    [self.view addGestureRecognizer:tap];
+}
+
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)other {
+    return YES;
+}
+
+- (void)fallbackTap:(UITapGestureRecognizer *)g {
+    if (g.state != UIGestureRecognizerStateEnded) return;
+    UITableView *tv = (UITableView *)self.view;
+    CGPoint pt = [g locationInView:tv];
+    NSIndexPath *ip = [tv indexPathForRowAtPoint:pt];
+    if (!ip) return;
+    PSSpecifier *spec = [self ccvSpecifierAtIndexPath:ip];
+    if (!spec) {
+        CCVLog(@"fallbackTap: (%ld,%ld) 未映射到 specifier", (long)ip.section, (long)ip.row);
+        return;
+    }
+    if ([[spec propertyForKey:@"isCreate"] boolValue]) {
+        CCVLog(@"fallbackTap: 命中创建模块 (%ld,%ld)", (long)ip.section, (long)ip.row);
+        [self createModule:spec];
+    } else if ([spec propertyForKey:@"moduleIndex"]) {
+        CCVLog(@"fallbackTap: 命中 %@ (%ld,%ld)", spec.name ?: @"nil", (long)ip.section, (long)ip.row);
+        [self openModule:spec];
+    }
 }
 
 - (NSMutableArray *)specifiers {
@@ -438,6 +469,12 @@
 // 创建模块：直接创建（无弹窗、不注销）。设置进程直接同步 bundle 文件（不走 SpringBoard 助手），
 // 失败原因写进诊断键，页脚可见。
 - (void)createModule:(PSSpecifier *)spec {
+    NSTimeInterval now = [NSDate date].timeIntervalSince1970;
+    if (now - self.ccvLastCreateAt < 0.6) {
+        CCVLog(@"createModule: 防抖忽略（距上次 %.2fs）", now - self.ccvLastCreateAt);
+        return;
+    }
+    self.ccvLastCreateAt = now;
     NSUInteger n = CCVMaxModules();
     CCVLog(@"createModule: 当前 max=%lu", (unsigned long)n);
     if (n >= CCV_MAX_MODULES) {
