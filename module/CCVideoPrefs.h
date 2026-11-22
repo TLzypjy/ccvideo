@@ -29,6 +29,9 @@ void CCVEnsureDirs(void);
 void CCVPostDarwin(NSString *name);
 void CCVPostSizeChange(void);          // SettingsChanged + ReloadSizes
 
+// 调试日志：追加写 /var/mobile/Library/CCVideo/log.txt（>300KB 自动重建），同时 NSLog
+void CCVLog(NSString *fmt, ...) NS_FORMAT_FUNCTION(1, 2);
+
 // ---------- 多模块 ----------
 #define CCV_MAX_MODULES 8
 NSUInteger CCVMaxModules(void);                          // 已创建模块数，1~8

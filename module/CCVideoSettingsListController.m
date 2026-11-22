@@ -302,9 +302,13 @@
 }
 
 - (void)openModule:(PSSpecifier *)spec {
-    // 去重：素材库已经推到顶就不再推（tap 触摸区/didSelect/buttonAction 可能多路触发）
-    if ([self.navigationController.topViewController isKindOfClass:[CCVideoLibraryViewController class]]) return;
     NSUInteger idx = [[spec propertyForKey:@"moduleIndex"] integerValue];
+    CCVLog(@"openModule: spec=%@ idx=%lu", spec.name ?: @"nil", (unsigned long)idx);
+    // 去重：素材库已经推到顶就不再推（tap 触摸区/didSelect/buttonAction 可能多路触发）
+    if ([self.navigationController.topViewController isKindOfClass:[CCVideoLibraryViewController class]]) {
+        CCVLog(@"openModule: 素材库已在栈顶，跳过");
+        return;
+    }
     if (idx == 0) idx = 1;
     CCVideoLibraryViewController *vc = [[CCVideoLibraryViewController alloc] init];
     vc.moduleIndex = idx;
@@ -314,24 +318,35 @@
 // ---------- 左滑删除（系统原生 trailingSwipeActions，状态由表格管理，reload 后不失效） ----------
 - (BOOL)tableView:(UITableView *)tableView canEditRowAtIndexPath:(NSIndexPath *)indexPath {
     PSSpecifier *spec = [self ccvSpecifierAtIndexPath:indexPath];
-    return spec && [spec propertyForKey:@"moduleIndex"]; // 仅模块行可左滑，创建行不可
+    BOOL editable = spec && [spec propertyForKey:@"moduleIndex"]; // 仅模块行可左滑，创建行不可
+    if (!editable) CCVLog(@"canEdit: (%ld,%ld) -> NO（spec=%@）", (long)indexPath.section, (long)indexPath.row, spec.name ?: @"nil");
+    return editable;
 }
 
 - (void)tableView:(UITableView *)tableView commitEditingStyle:(UITableViewCellEditingStyle)editingStyle forRowAtIndexPath:(NSIndexPath *)indexPath {
     if (editingStyle == UITableViewCellEditingStyleDelete) {
         PSSpecifier *spec = [self ccvSpecifierAtIndexPath:indexPath];
-        if (spec) [self deleteModule:spec];
+        CCVLog(@"commitEditingStyle: (%ld,%ld) spec=%@", (long)indexPath.section, (long)indexPath.row, spec.name ?: @"nil");
+        if (spec) {
+            dispatch_async(dispatch_get_main_queue(), ^{ [self deleteModule:spec]; });
+        }
     }
 }
 
 - (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
     PSSpecifier *spec = [self ccvSpecifierAtIndexPath:indexPath];
-    if (!spec || ![spec propertyForKey:@"moduleIndex"]) return nil;
+    if (!spec || ![spec propertyForKey:@"moduleIndex"]) {
+        CCVLog(@"trailingSwipe: (%ld,%ld) 无删除动作（spec=%@）", (long)indexPath.section, (long)indexPath.row, spec.name ?: @"nil");
+        return nil;
+    }
+    CCVLog(@"trailingSwipe: (%ld,%ld) 提供删除按钮 spec=%@ idx=%@", (long)indexPath.section, (long)indexPath.row,
+           spec.name, [[spec propertyForKey:@"moduleIndex"] integerValue]);
     UIContextualAction *del = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleDestructive
                                                                       title:@"删除"
                                                                     handler:^(UIContextualAction *action, UIView *view, void (^completion)(BOOL)) {
-        [self deleteModule:spec];
-        completion(YES);
+        CCVLog(@"swipe删除按钮点击: spec=%@ idx=%@", spec.name, [[spec propertyForKey:@"moduleIndex"] integerValue]);
+        completion(YES); // 先让系统收起滑动动画（在动画中同步 reload 会吞掉刷新）
+        dispatch_async(dispatch_get_main_queue(), ^{ [self deleteModule:spec]; });
     }];
     del.backgroundColor = [UIColor systemRedColor];
     UISwipeActionsConfiguration *cfg = [UISwipeActionsConfiguration configurationWithActions:@[del]];
@@ -344,7 +359,11 @@
 - (void)deleteModule:(PSSpecifier *)spec {
     NSUInteger idx = [[spec propertyForKey:@"moduleIndex"] integerValue];
     NSUInteger n = CCVMaxModules();
-    if (idx < 1 || idx > n || n <= 1) return;
+    CCVLog(@"deleteModule: 开始 idx=%lu max=%lu spec=%@", (unsigned long)idx, (unsigned long)n, spec.name ?: @"nil");
+    if (idx < 1 || idx > n || n <= 1) {
+        CCVLog(@"deleteModule: 拒绝（idx=%lu 越界或只剩 1 个）", (unsigned long)idx);
+        return;
+    }
 
     NSArray<NSString *> *keys = @[CCVKeySelectedVideo, CCVKeyPortraitW, CCVKeyPortraitH,
                                   CCVKeyLandscapeW, CCVKeyLandscapeH, CCVKeyAspectFill];
@@ -360,35 +379,45 @@
                 }
             }
         }
+        CCVLog(@"deleteModule: 键值已前移（%lu -> %lu）", (unsigned long)idx, (unsigned long)n);
     }
     for (NSString *base in keys) {
         [prefs removeObjectForKey:CCVKeyForModule(base, n)];
     }
     CCVSetMaxModules(n - 1);
     [prefs synchronize];
+    CCVLog(@"deleteModule: MaxModules %lu -> %lu", (unsigned long)n, (unsigned long)n - 1);
     [self syncBundlesAndRecordDiag]; // 同步移除多余 bundle 文件
     CCVPostDarwin(CCVDarwinSettingsChanged);
 
+    CCVLog(@"deleteModule: reloadSpecifiers 前");
     _specifiers = nil;
     [self reloadSpecifiers];
+    CCVLog(@"deleteModule: reloadSpecifiers 后（应显示 %lu 个模块）", (unsigned long)n - 1);
 }
 
 // 创建模块：直接创建（无弹窗、不注销）。设置进程直接同步 bundle 文件（不走 SpringBoard 助手），
 // 失败原因写进诊断键，页脚可见。
 - (void)createModule:(PSSpecifier *)spec {
     NSUInteger n = CCVMaxModules();
-    if (n >= CCV_MAX_MODULES) return;
+    CCVLog(@"createModule: 当前 max=%lu", (unsigned long)n);
+    if (n >= CCV_MAX_MODULES) {
+        CCVLog(@"createModule: 已满 8 个，拒绝");
+        return;
+    }
     CCVSetMaxModules(n + 1);
     [self syncBundlesAndRecordDiag];
     CCVPostDarwin(CCVDarwinSettingsChanged);
     _specifiers = nil;
     [self reloadSpecifiers];
+    CCVLog(@"createModule: 完成 max=%lu", (unsigned long)n + 1);
 }
 
 // 用设置进程同步 PendingBundles -> ControlCenter/Bundles（与 SpringBoard 同为 mobile 用户，目录已 0777）
 - (void)syncBundlesAndRecordDiag {
     NSError *err = nil;
     CCVSyncPendingBundles(&err);
+    if (err) CCVLog(@"syncBundlesAndRecordDiag: 失败 %@", err);
     [CCVPrefs() setObject:(err ? err.localizedDescription : @"") forKey:@"LastSyncError"];
     [CCVPrefs() synchronize];
 }

@@ -27,6 +27,45 @@ NSUserDefaults *CCVPrefs(void) {
     return prefs;
 }
 
+// ---------- 调试日志 ----------
+void CCVLog(NSString *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    NSString *msg = [[NSString alloc] initWithFormat:fmt arguments:args];
+    va_end(args);
+    NSLog(@"[CCVideo] %@", msg);
+
+    @try {
+        static BOOL ensured = NO;
+        if (!ensured) { CCVEnsureDirs(); ensured = YES; }
+        NSFileManager *fm = [NSFileManager defaultManager];
+        NSString *logPath = [CCVLibraryRoot stringByAppendingPathComponent:@"log.txt"];
+        NSDictionary *attr = [fm attributesOfItemAtPath:logPath error:nil];
+        if ([attr fileSize] > 300 * 1024) [fm removeItemAtPath:logPath error:nil]; // 防无限膨胀
+        static NSDateFormatter *df = nil;
+        static dispatch_once_t once;
+        dispatch_once(&once, ^{
+            df = [[NSDateFormatter alloc] init];
+            df.dateFormat = @"MM-dd HH:mm:ss.SSS";
+        });
+        NSString *line = [NSString stringWithFormat:@"[%@][%@] %@\n",
+                          [df stringFromDate:[NSDate date]],
+                          [NSThread isMainThread] ? @"main" : @"bg", msg];
+        NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:logPath];
+        if (!fh) {
+            [fm createFileAtPath:logPath contents:nil attributes:nil];
+            fh = [NSFileHandle fileHandleForWritingAtPath:logPath];
+        }
+        if (fh) {
+            [fh seekToEndOfFile];
+            [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+            [fh closeFile];
+        }
+    } @catch (NSException *e) {
+        NSLog(@"[CCVideo] log write failed: %@", e);
+    }
+}
+
 void CCVEnsureDirs(void) {
     NSFileManager *fm = [NSFileManager defaultManager];
     for (NSString *path in @[CCVLibraryRoot, CCVVideoDir, CCVThumbDir]) {
@@ -93,6 +132,7 @@ BOOL CCVSyncPendingBundles(NSError *__autoreleasing _Nullable *outError) {
     NSUInteger max = CCVMaxModules();
     BOOL changed = NO;
     NSError *firstErr = nil;
+    CCVLog(@"syncBundles: root=%@ max=%lu", root, (unsigned long)max);
 
     // 拷贝缺失的（2..max）
     for (NSUInteger n = 2; n <= max; n++) {
@@ -100,12 +140,17 @@ BOOL CCVSyncPendingBundles(NSError *__autoreleasing _Nullable *outError) {
         NSString *dst = [ccDir stringByAppendingPathComponent:name];
         NSString *src = [pendDir stringByAppendingPathComponent:name];
         if ([fm fileExistsAtPath:dst]) continue;
-        if (![fm fileExistsAtPath:src]) continue;
+        if (![fm fileExistsAtPath:src]) {
+            CCVLog(@"syncBundles: 缺源 %@（PendingBundles 里没有）", name);
+            continue;
+        }
         NSError *e = nil;
         if ([fm copyItemAtPath:src toPath:dst error:&e]) {
             changed = YES;
-        } else if (!firstErr) {
-            firstErr = e;
+            CCVLog(@"syncBundles: 已拷入 %@", name);
+        } else {
+            CCVLog(@"syncBundles: 拷入 %@ 失败: %@", name, e);
+            if (!firstErr) firstErr = e;
         }
     }
     // 清理多余的（max+1..8）
@@ -116,10 +161,13 @@ BOOL CCVSyncPendingBundles(NSError *__autoreleasing _Nullable *outError) {
         NSError *e = nil;
         if ([fm removeItemAtPath:dst error:&e]) {
             changed = YES;
-        } else if (!firstErr) {
-            firstErr = e;
+            CCVLog(@"syncBundles: 已移除 %@", name);
+        } else {
+            CCVLog(@"syncBundles: 移除 %@ 失败: %@", name, e);
+            if (!firstErr) firstErr = e;
         }
     }
+    CCVLog(@"syncBundles: 完成 changed=%d err=%@", changed, firstErr);
     if (outError) *outError = firstErr;
     return changed;
 }
