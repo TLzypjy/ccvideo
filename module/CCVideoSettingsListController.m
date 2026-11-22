@@ -339,12 +339,12 @@
         CCVLog(@"trailingSwipe: (%ld,%ld) 无删除动作（spec=%@）", (long)indexPath.section, (long)indexPath.row, spec.name ?: @"nil");
         return nil;
     }
-    CCVLog(@"trailingSwipe: (%ld,%ld) 提供删除按钮 spec=%@ idx=%@", (long)indexPath.section, (long)indexPath.row,
-           spec.name, [[spec propertyForKey:@"moduleIndex"] integerValue]);
+    CCVLog(@"trailingSwipe: (%ld,%ld) 提供删除按钮 spec=%@ idx=%ld", (long)indexPath.section, (long)indexPath.row,
+           spec.name, (long)[[spec propertyForKey:@"moduleIndex"] integerValue]);
     UIContextualAction *del = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleDestructive
                                                                       title:@"删除"
                                                                     handler:^(UIContextualAction *action, UIView *view, void (^completion)(BOOL)) {
-        CCVLog(@"swipe删除按钮点击: spec=%@ idx=%@", spec.name, [[spec propertyForKey:@"moduleIndex"] integerValue]);
+        CCVLog(@"swipe删除按钮点击: spec=%@ idx=%ld", spec.name, (long)[[spec propertyForKey:@"moduleIndex"] integerValue]);
         completion(YES); // 先让系统收起滑动动画（在动画中同步 reload 会吞掉刷新）
         dispatch_async(dispatch_get_main_queue(), ^{ [self deleteModule:spec]; });
     }];
