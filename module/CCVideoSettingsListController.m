@@ -111,7 +111,7 @@
 
         _modTitle = [[UILabel alloc] init];
         _modTitle.text = specifier.name;
-        _modTitle.font = [UIFont systemFontOfSize:17];
+        _modTitle.font = [UIFont systemFontOfSize:12];
         _modTitle.textColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *t) {
             return t.userInterfaceStyle == UIUserInterfaceStyleDark
                 ? [UIColor whiteColor] : [UIColor colorWithWhite:0.1 alpha:1.0];
@@ -121,7 +121,7 @@
 
         _chevron = [[UILabel alloc] init];
         _chevron.text = @"›";
-        _chevron.font = [UIFont boldSystemFontOfSize:20];
+        _chevron.font = [UIFont boldSystemFontOfSize:14];
         _chevron.textAlignment = NSTextAlignmentCenter;
         _chevron.textColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *t) {
             return t.userInterfaceStyle == UIUserInterfaceStyleDark
@@ -175,6 +175,83 @@
 
 @end
 
+// ---------- 自定义"创建模块" cell：蓝字 12pt（系统 PSButtonCell 字号无法控制） ----------
+@interface CCVCreateCell : PSTableCell
+@property (nonatomic, strong) UILabel *createTitle;
+@property (nonatomic, strong) UIControl *tapZone;
+@end
+
+@implementation CCVCreateCell
+
+- (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)reuseIdentifier specifier:(PSSpecifier *)specifier {
+    if (self = [super initWithStyle:style reuseIdentifier:reuseIdentifier specifier:specifier]) {
+        self.backgroundColor = [UIColor clearColor];
+        self.selectionStyle = UITableViewCellSelectionStyleNone;
+        self.userInteractionEnabled = YES;
+        self.contentView.userInteractionEnabled = YES;
+
+        self.textLabel.text = @"";
+        self.textLabel.hidden = YES;
+        if (self.detailTextLabel) self.detailTextLabel.hidden = YES;
+
+        UIView *card = [[UIView alloc] init];
+        card.backgroundColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *t) {
+            return t.userInterfaceStyle == UIUserInterfaceStyleDark
+                ? [UIColor colorWithWhite:0.11 alpha:1.0]
+                : [UIColor colorWithWhite:1.0 alpha:0.72];
+        }];
+        card.layer.cornerRadius = 22;
+        card.userInteractionEnabled = NO;
+        self.backgroundView = card;
+
+        _createTitle = [[UILabel alloc] init];
+        _createTitle.text = specifier.name; // 创建模块
+        _createTitle.font = [UIFont systemFontOfSize:12];
+        _createTitle.textColor = [UIColor colorWithRed:0.0 green:0.48 blue:1.0 alpha:1.0];
+        _createTitle.userInteractionEnabled = NO;
+        [self.contentView addSubview:_createTitle];
+
+        _tapZone = [[UIControl alloc] init];
+        _tapZone.backgroundColor = [UIColor clearColor];
+        [_tapZone addTarget:self action:@selector(createTapped) forControlEvents:UIControlEventTouchUpInside];
+        [self.contentView addSubview:_tapZone];
+    }
+    return self;
+}
+
+- (void)createTapped {
+    PSSpecifier *spec = self.specifier;
+    id target = [spec target];
+    if ([target respondsToSelector:@selector(createModule:)]) {
+        [target performSelector:@selector(createModule:) withObject:spec];
+    }
+}
+
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+    if (self.tapZone && [self.tapZone pointInside:[self convertPoint:point toView:self.tapZone] withEvent:event]) {
+        return self.tapZone;
+    }
+    return [super hitTest:point withEvent:event];
+}
+
+- (void)refreshCellContentsWithSpecifier:(PSSpecifier *)specifier {
+    [super refreshCellContentsWithSpecifier:specifier];
+    self.createTitle.text = specifier.name;
+    self.textLabel.text = @"";
+    self.textLabel.hidden = YES;
+    if (self.detailTextLabel) self.detailTextLabel.hidden = YES;
+}
+
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    CGFloat w = self.contentView.bounds.size.width;
+    CGFloat h = self.contentView.bounds.size.height;
+    self.createTitle.frame = CGRectMake(20, (h - 16) / 2, w - 40, 16);
+    self.tapZone.frame = self.contentView.bounds;
+}
+
+@end
+
 // ---------- 主页：模块列表 + 创建模块 ----------
 @implementation CCVideoSettingsListController
 
@@ -207,7 +284,8 @@
         if (n < CCV_MAX_MODULES) {
             PSSpecifier *create = [PSSpecifier preferenceSpecifierNamed:@"创建模块"
                     target:self set:nil get:nil detail:nil cell:PSButtonCell edit:nil];
-            create.buttonAction = @selector(createModule:);
+            [create setProperty:[CCVCreateCell class] forKey:@"cellClass"]; // 蓝字 12pt 自绘
+            create.buttonAction = @selector(createModule:);                 // 兜底触发
             [specs addObject:create];
         }
 
@@ -341,7 +419,10 @@
         return [CCVDisplayModeCell preferredHeight];
     }
     if (cls == [CCVModuleCell class]) {
-        return 56;
+        return 44;
+    }
+    if (cls == [CCVCreateCell class]) {
+        return 44;
     }
     return [super tableView:tableView heightForRowAtIndexPath:indexPath];
 }
