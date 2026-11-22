@@ -1,4 +1,5 @@
 #import "CCVideoPrefs.h"
+#include <dlfcn.h>
 
 NSString * const CCVBundleID = @"com.wuba.ccvideo";
 NSString * const CCVLibraryRoot = @"/var/mobile/Library/CCVideo";
@@ -63,6 +64,64 @@ void CCVSetMaxModules(NSUInteger n) {
 NSString *CCVKeyForModule(NSString *baseKey, NSUInteger moduleIndex) {
     if (moduleIndex <= 1) return baseKey; // 模块 1 用原键，兼容旧数据
     return [NSString stringWithFormat:@"%@%lu", baseKey, (unsigned long)moduleIndex];
+}
+
+// ---------- jbroot 推导（rootless=/var/jb，roothide=随机 jbroot，通用） ----------
+NSString *CCVJBRootForProcess(void) {
+    Dl_info info;
+    if (dladdr((void *)&CCVJBRootForProcess, &info) && info.dli_fname) {
+        NSString *selfPath = [NSString stringWithUTF8String:info.dli_fname];
+        for (NSString *marker in @[@"/Library/PreferenceBundles/",
+                                   @"/Library/ControlCenter/Bundles/",
+                                   @"/Library/MobileSubstrate/DynamicLibraries/"]) {
+            NSRange r = [selfPath rangeOfString:marker];
+            if (r.location != NSNotFound && r.location > 0) {
+                return [selfPath substringToIndex:r.location];
+            }
+        }
+    }
+    return @"/var/jb"; // rootless 兜底
+}
+
+// ---------- 模块 bundle 同步 ----------
+// 需要目录可写：deb 的 postinst 已把 ControlCenter/Bundles chmod 0777
+BOOL CCVSyncPendingBundles(NSError *__autoreleasing _Nullable *outError) {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *root = CCVJBRootForProcess();
+    NSString *ccDir = [root stringByAppendingPathComponent:@"Library/ControlCenter/Bundles"];
+    NSString *pendDir = [root stringByAppendingPathComponent:@"Library/CCVideoPendingBundles"];
+    NSUInteger max = CCVMaxModules();
+    BOOL changed = NO;
+    NSError *firstErr = nil;
+
+    // 拷贝缺失的（2..max）
+    for (NSUInteger n = 2; n <= max; n++) {
+        NSString *name = [NSString stringWithFormat:@"CCVideo%lu.bundle", (unsigned long)n];
+        NSString *dst = [ccDir stringByAppendingPathComponent:name];
+        NSString *src = [pendDir stringByAppendingPathComponent:name];
+        if ([fm fileExistsAtPath:dst]) continue;
+        if (![fm fileExistsAtPath:src]) continue;
+        NSError *e = nil;
+        if ([fm copyItemAtPath:src toPath:dst error:&e]) {
+            changed = YES;
+        } else if (!firstErr) {
+            firstErr = e;
+        }
+    }
+    // 清理多余的（max+1..8）
+    for (NSUInteger n = max + 1; n <= CCV_MAX_MODULES; n++) {
+        NSString *name = [NSString stringWithFormat:@"CCVideo%lu.bundle", (unsigned long)n];
+        NSString *dst = [ccDir stringByAppendingPathComponent:name];
+        if (![fm fileExistsAtPath:dst]) continue;
+        NSError *e = nil;
+        if ([fm removeItemAtPath:dst error:&e]) {
+            changed = YES;
+        } else if (!firstErr) {
+            firstErr = e;
+        }
+    }
+    if (outError) *outError = firstErr;
+    return changed;
 }
 
 NSInteger CCVDisplayMode(void) {

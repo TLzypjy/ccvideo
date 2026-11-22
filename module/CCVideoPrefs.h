@@ -39,6 +39,11 @@ NSString *CCVSelectedVideoNameForModule(NSUInteger moduleIndex);
 void CCVSetSelectedVideo(NSString *name, NSUInteger moduleIndex);
 NSUInteger CCVSizeForModule(NSString *baseKey, NSUInteger moduleIndex); // 读取并钳位 1~4
 
+// 模块 bundle 同步：把 PendingBundles 里缺失的拷入 ControlCenter/Bundles，
+// 并清掉超出 MaxModules 的多余 bundle。返回 YES 表示有文件变更；失败时 *outError 带原因。
+BOOL CCVSyncPendingBundles(NSError *__autoreleasing _Nullable *outError);
+NSString *CCVJBRootForProcess(void);                     // 当前进程的 jbroot（rootless/roothide 通用）
+
 NSString *CCVSelectedVideoName(void);  // 模块 1 便捷（可能为空）
 NSArray<NSString *> *CCVVideoFileNames(void); // 排序后的视频文件名列表
 NSString *CCVThumbPathForVideoName(NSString *videoName);

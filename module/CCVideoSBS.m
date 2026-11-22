@@ -35,6 +35,8 @@ static void CCVSBNotifyCallback(CFNotificationCenterRef center, void *observer,
         NSString *root = CCVJBRoot();
         NSString *ccDir = [root stringByAppendingPathComponent:@"Library/ControlCenter/Bundles"];
         NSString *pendDir = [root stringByAppendingPathComponent:@"Library/CCVideoPendingBundles"];
+        NSString *firstErr = nil;
+        BOOL copied = NO, removed = NO;
         for (int n = 2; n <= max; n++) {
             NSString *bundleName = [NSString stringWithFormat:@"CCVideo%d.bundle", n];
             NSString *dst = [ccDir stringByAppendingPathComponent:bundleName];
@@ -43,8 +45,10 @@ static void CCVSBNotifyCallback(CFNotificationCenterRef center, void *observer,
             if (![fm fileExistsAtPath:src]) continue;
             NSError *err = nil;
             if ([fm copyItemAtPath:src toPath:dst error:&err]) {
+                copied = YES;
                 NSLog(@"[CCVideoSBS] copied %@ (载入需下次注销)", bundleName);
             } else {
+                firstErr = [NSString stringWithFormat:@"拷贝%@: %@", bundleName, err.localizedDescription];
                 NSLog(@"[CCVideoSBS] copy %@ failed: %@", bundleName, err);
             }
         }
@@ -56,11 +60,21 @@ static void CCVSBNotifyCallback(CFNotificationCenterRef center, void *observer,
             if (![fm fileExistsAtPath:dst]) continue;
             NSError *err = nil;
             if ([fm removeItemAtPath:dst error:&err]) {
+                removed = YES;
                 NSLog(@"[CCVideoSBS] removed %@ (同步需下次注销)", bundleName);
             } else {
+                firstErr = [NSString stringWithFormat:@"清理%@: %@", bundleName, err.localizedDescription];
                 NSLog(@"[CCVideoSBS] remove %@ failed: %@", bundleName, err);
             }
         }
+        // 诊断信息写回偏好（设置页脚可见，区分"没注入"与"拷贝失败"）
+        NSUserDefaults *diag = [[NSUserDefaults alloc] initWithSuiteName:@"com.wuba.ccvideo"];
+        [diag setObject:[NSString stringWithFormat:@"已注入 %@ 拷%d清%d jbroot=%@",
+                         [NSDate date], copied ? 1 : 0, removed ? 1 : 0, root]
+                 forKey:@"SBSDiag"];
+        if (firstErr) [diag setObject:firstErr forKey:@"SBSError"];
+        else [diag removeObjectForKey:@"SBSError"];
+        [diag synchronize];
         // 不 exit(0)：按用户要求创建模块不触发注销
     });
 }

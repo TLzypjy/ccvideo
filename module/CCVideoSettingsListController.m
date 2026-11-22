@@ -344,12 +344,21 @@ static const CGFloat CCVSwipeWidth = 76.0; // 删除按钮宽度
     if (!_specifiers) {
         NSMutableArray *specs = [NSMutableArray array];
         NSUInteger n = CCVMaxModules();
+        CFPreferencesAppSynchronize((__bridge CFStringRef)CCVBundleID); // 拿到 SpringBoard 侧写入的最新诊断
 
         // 小分类：模块行 + 创建模块紧挨着（同一个组）
         PSSpecifier *g0 = [PSSpecifier preferenceSpecifierNamed:@""
                 target:self set:nil get:nil detail:nil cell:PSGroupCell edit:nil];
-        [g0 setProperty:[NSString stringWithFormat:@"点击模块名可选择素材，左滑模块行可删除该模块。已创建 %lu / 8 个，创建/删除的模块在下次注销后同步到控制中心。",
-                         (unsigned long)n] forKey:@"footerText"];
+        NSMutableString *footer = [NSMutableString stringWithFormat:
+            @"点击模块名可选择素材，左滑模块行可删除该模块。已创建 %lu / 8 个，创建/删除的模块在下次注销后同步到控制中心。",
+            (unsigned long)n];
+        NSString *syncErr = [CCVPrefs() stringForKey:@"LastSyncError"];
+        if (syncErr.length) [footer appendFormat:@"\n⚠️ 模块文件同步失败：%@", syncErr];
+        NSString *sbsDiag = [CCVPrefs() stringForKey:@"SBSDiag"];
+        NSString *sbsErr = [CCVPrefs() stringForKey:@"SBSError"];
+        if (sbsErr.length) [footer appendFormat:@"\n⚠️ SpringBoard助手：%@", sbsErr];
+        if (sbsDiag.length) [footer appendFormat:@"\n[SBS] %@", sbsDiag];
+        [g0 setProperty:footer forKey:@"footerText"];
         [specs addObject:g0];
 
         for (NSUInteger i = 1; i <= n; i++) {
@@ -447,20 +456,31 @@ static const CGFloat CCVSwipeWidth = 76.0; // 删除按钮宽度
     }
     CCVSetMaxModules(n - 1);
     [prefs synchronize];
+    [self syncBundlesAndRecordDiag]; // 同步移除多余 bundle 文件
     CCVPostDarwin(CCVDarwinSettingsChanged);
 
     _specifiers = nil;
     [self reloadSpecifiers];
 }
 
-// 创建模块：直接创建（无弹窗、不注销），SpringBoard 侧只拷贝 bundle，下次注销自动载入
+// 创建模块：直接创建（无弹窗、不注销）。设置进程直接同步 bundle 文件（不走 SpringBoard 助手），
+// 失败原因写进诊断键，页脚可见。
 - (void)createModule:(PSSpecifier *)spec {
     NSUInteger n = CCVMaxModules();
     if (n >= CCV_MAX_MODULES) return;
     CCVSetMaxModules(n + 1);
+    [self syncBundlesAndRecordDiag];
     CCVPostDarwin(CCVDarwinSettingsChanged);
     _specifiers = nil;
     [self reloadSpecifiers];
+}
+
+// 用设置进程同步 PendingBundles -> ControlCenter/Bundles（与 SpringBoard 同为 mobile 用户，目录已 0777）
+- (void)syncBundlesAndRecordDiag {
+    NSError *err = nil;
+    CCVSyncPendingBundles(&err);
+    [CCVPrefs() setObject:(err ? err.localizedDescription : @"") forKey:@"LastSyncError"];
+    [CCVPrefs() synchronize];
 }
 
 // ---------- 每模块尺寸滑杆（与子页同一套 get/set） ----------
