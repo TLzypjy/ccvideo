@@ -82,9 +82,11 @@
 // 不再在 cell 里放自定义 pan 手势——实测 reloadSpecifiers 后自定义手势会失灵。
 @interface CCVRowCell : PSTableCell
 @property (nonatomic, strong) PSSpecifier *ccvSpec;  // 自己保存（不依赖基类只读 specifier）
+@property (nonatomic, weak) id ccvController;        // 弱引用列表控制器（rowTapped 日志兜底用）
 @property (nonatomic, strong) UILabel *rowTitle;
 @property (nonatomic, strong) UILabel *chevron;
 @property (nonatomic, strong) UIControl *tapZone;
+- (void)applySpecifierStyle;
 @end
 
 @implementation CCVRowCell
@@ -113,32 +115,37 @@
         card.userInteractionEnabled = NO;
         self.backgroundView = card;
 
-        _rowTitle = [[UILabel alloc] init];
-        _rowTitle.font = [UIFont systemFontOfSize:12];
-        _rowTitle.userInteractionEnabled = NO;
-        [self.contentView addSubview:_rowTitle];
-
-        _chevron = [[UILabel alloc] init];
-        _chevron.text = @"›";
-        _chevron.font = [UIFont boldSystemFontOfSize:14];
-        _chevron.textAlignment = NSTextAlignmentCenter;
-        _chevron.textColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *t) {
-            return t.userInterfaceStyle == UIUserInterfaceStyleDark
-                ? [UIColor colorWithWhite:0.5 alpha:1.0]
-                : [UIColor colorWithWhite:0.75 alpha:1.0];
-        }];
-        _chevron.userInteractionEnabled = NO;
-        [self.contentView addSubview:_chevron];
-
-        // 全尺寸透明触摸区（hitTest 强制转发到这里，负责"点击进素材库"）
-        _tapZone = [[UIControl alloc] init];
-        _tapZone.backgroundColor = [UIColor clearColor];
-        [_tapZone addTarget:self action:@selector(rowTapped) forControlEvents:UIControlEventTouchUpInside];
-        [self.contentView addSubview:_tapZone];
-
+        [self ccvSetupSubviews];
         [self applySpecifierStyle];
     }
     return self;
+}
+
+// 子视图统一创建（init 和 refresh 都调——防某些创建路径没走 init-with-specifier 导致 tapZone 缺失）
+- (void)ccvSetupSubviews {
+    if (_tapZone) return; // 已建过（复用 cell）就不重复建
+    _rowTitle = [[UILabel alloc] init];
+    _rowTitle.font = [UIFont systemFontOfSize:12];
+    _rowTitle.userInteractionEnabled = NO;
+    [self.contentView addSubview:_rowTitle];
+
+    _chevron = [[UILabel alloc] init];
+    _chevron.text = @"›";
+    _chevron.font = [UIFont boldSystemFontOfSize:14];
+    _chevron.textAlignment = NSTextAlignmentCenter;
+    _chevron.textColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *t) {
+        return t.userInterfaceStyle == UIUserInterfaceStyleDark
+            ? [UIColor colorWithWhite:0.5 alpha:1.0]
+            : [UIColor colorWithWhite:0.75 alpha:1.0];
+    }];
+    _chevron.userInteractionEnabled = NO;
+    [self.contentView addSubview:_chevron];
+
+    // 全尺寸透明触摸区（hitTest 空白区落到这里，负责"点击进素材库/创建"）
+    _tapZone = [[UIControl alloc] init];
+    _tapZone.backgroundColor = [UIColor clearColor];
+    [_tapZone addTarget:self action:@selector(rowTapped) forControlEvents:UIControlEventTouchUpInside];
+    [self.contentView addSubview:_tapZone];
 }
 
 // 按 specifier 属性套样式（创建行蓝字无箭头；模块行黑字带箭头）
@@ -160,15 +167,26 @@
 
 - (void)rowTapped {
     PSSpecifier *spec = self.ccvSpec;
+    CCVLog(@"rowTapped: spec=%@ isCreate=%d moduleIndex=%@ target=%@",
+           spec.name ?: @"nil",
+           [[spec propertyForKey:@"isCreate"] boolValue] ? 1 : 0,
+           [spec propertyForKey:@"moduleIndex"] ?: @"无",
+           [spec target] ?: @"nil");
     id target = [spec target];
     if ([[spec propertyForKey:@"isCreate"] boolValue]) {
         if ([target respondsToSelector:@selector(createModule:)]) {
             [target performSelector:@selector(createModule:) withObject:spec];
+        } else {
+            CCVLog(@"rowTapped: target 不响应 createModule:，忽略");
         }
     } else if ([spec propertyForKey:@"moduleIndex"]) {
         if ([target respondsToSelector:@selector(openModule:)]) {
             [target performSelector:@selector(openModule:) withObject:spec];
+        } else {
+            CCVLog(@"rowTapped: target 不响应 openModule:，忽略");
         }
+    } else {
+        CCVLog(@"rowTapped: spec 无 isCreate/moduleIndex（疑似复用串位），忽略");
     }
 }
 
@@ -184,6 +202,7 @@
 - (void)refreshCellContentsWithSpecifier:(PSSpecifier *)specifier {
     [super refreshCellContentsWithSpecifier:specifier];
     self.ccvSpec = specifier; // 关键：复用时自己刷新 specifier，不信基类
+    [self ccvSetupSubviews];  // 若 cell 走了没带 specifier 的创建路径，这里把 tapZone 等补齐
     [self applySpecifierStyle];
     self.textLabel.text = @"";
     self.textLabel.hidden = YES;
@@ -289,6 +308,25 @@
         row++;
     }
     return nil;
+}
+
+// 模块行/创建行 cell 由这里直接配置，不再依赖 PSListController 的复用/刷新机制——
+// 实测连续多次 reloadSpecifiers 后可能出现"点击没反应"（cell 走错创建路径或复用状态卡死），
+// 直接按 indexPath 拿最新 specifier 配置，杜绝串位和 tapZone 缺失。
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    PSSpecifier *spec = [self ccvSpecifierAtIndexPath:indexPath];
+    if (spec && [spec propertyForKey:@"cellClass"] == [CCVRowCell class]) {
+        static NSString *rid = @"CCVRowIdent";
+        CCVRowCell *cell = [tableView dequeueReusableCellWithIdentifier:rid];
+        if (!cell || !cell.tapZone) { // tapZone 缺失说明该 cell 没走我们的 init，重建
+            cell = [[CCVRowCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:rid specifier:spec];
+            cell.ccvController = self;
+        }
+        cell.ccvSpec = spec;
+        [cell applySpecifierStyle];
+        return cell;
+    }
+    return [super tableView:tableView cellForRowAtIndexPath:indexPath];
 }
 
 // 模块行（黑字）点击 -> 直接进入该模块的素材库选素材
