@@ -75,26 +75,19 @@
 
 @end
 
-// ---------- 统一行 cell：模块行（黑字+箭头+左滑删除）与创建模块（蓝字）共用一个类 ----------
+// ---------- 统一行 cell：模块行（黑字+箭头）与创建模块（蓝字）共用一个类 ----------
 // 为什么统一：PSListController 复用 cell 时（1) 基类的 specifier 属性不保证刷新，
-// (2) 不同 cellClass 可能共用复用池导致类串位（模块行拿到创建 cell → 点了变创建）。
-// 统一类 + 自己保存 specifier（ccvSpec）+ 行为由 specifier 属性决定，彻底杜绝串位。
-// 另外：卡片必须不透明、删除按钮默认隐藏——否则按钮会透过半透明卡片"常显"。
-@interface CCVRowCell : PSTableCell <UIGestureRecognizerDelegate>
+// (2) 不同 cellClass 可能共用复用池导致类串位。统一类 + 自己保存 specifier（ccvSpec）。
+// 左滑删除用系统原生的 trailingSwipeActions（滑动检测/动画/状态全由表格管理），
+// 不再在 cell 里放自定义 pan 手势——实测 reloadSpecifiers 后自定义手势会失灵。
+@interface CCVRowCell : PSTableCell
 @property (nonatomic, strong) PSSpecifier *ccvSpec;  // 自己保存（不依赖基类只读 specifier）
-@property (nonatomic, assign) BOOL isCreate;
-@property (nonatomic, strong) UIView *cardWrap;
 @property (nonatomic, strong) UILabel *rowTitle;
 @property (nonatomic, strong) UILabel *chevron;
 @property (nonatomic, strong) UIControl *tapZone;
-@property (nonatomic, strong) UIButton *deleteBtn;
-@property (nonatomic, assign) CGFloat dragBase;
-@property (nonatomic, assign) BOOL swipeOpen;
 @end
 
 @implementation CCVRowCell
-
-static const CGFloat CCVSwipeWidth = 76.0;
 
 - (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)reuseIdentifier specifier:(PSSpecifier *)specifier {
     if (self = [super initWithStyle:style reuseIdentifier:reuseIdentifier specifier:specifier]) {
@@ -109,41 +102,21 @@ static const CGFloat CCVSwipeWidth = 76.0;
         self.textLabel.hidden = YES;
         if (self.detailTextLabel) self.detailTextLabel.hidden = YES;
 
-        // 红色删除按钮（垫在卡片下面，左滑露出；默认隐藏防透出）
-        _deleteBtn = [UIButton buttonWithType:UIButtonTypeCustom];
-        _deleteBtn.backgroundColor = [UIColor systemRedColor];
-        _deleteBtn.layer.cornerRadius = 22;
-        [_deleteBtn setTitle:@"删除" forState:UIControlStateNormal];
-        [_deleteBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-        _deleteBtn.titleLabel.font = [UIFont systemFontOfSize:12];
-        _deleteBtn.hidden = YES;
-        [_deleteBtn addTarget:self action:@selector(deleteTapped) forControlEvents:UIControlEventTouchUpInside];
-        [self.contentView addSubview:_deleteBtn];
-
-        // 卡片容器（整体平移）
-        _cardWrap = [[UIView alloc] init];
-        _cardWrap.backgroundColor = [UIColor clearColor];
-        _cardWrap.userInteractionEnabled = NO;
-        [self.contentView addSubview:_cardWrap];
-
+        // 不透明卡片背景（跟随深浅色）
         UIView *card = [[UIView alloc] init];
         card.backgroundColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *t) {
             return t.userInterfaceStyle == UIUserInterfaceStyleDark
                 ? [UIColor colorWithWhite:0.11 alpha:1.0]
-                : [UIColor whiteColor]; // 不透明：底下的删除按钮不能透出来
+                : [UIColor whiteColor];
         }];
         card.layer.cornerRadius = 22;
         card.userInteractionEnabled = NO;
-        [_cardWrap addSubview:card];
+        self.backgroundView = card;
 
         _rowTitle = [[UILabel alloc] init];
         _rowTitle.font = [UIFont systemFontOfSize:12];
-        _rowTitle.textColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *t) {
-            return t.userInterfaceStyle == UIUserInterfaceStyleDark
-                ? [UIColor whiteColor] : [UIColor colorWithWhite:0.1 alpha:1.0];
-        }];
         _rowTitle.userInteractionEnabled = NO;
-        [_cardWrap addSubview:_rowTitle];
+        [self.contentView addSubview:_rowTitle];
 
         _chevron = [[UILabel alloc] init];
         _chevron.text = @"›";
@@ -155,88 +128,40 @@ static const CGFloat CCVSwipeWidth = 76.0;
                 : [UIColor colorWithWhite:0.75 alpha:1.0];
         }];
         _chevron.userInteractionEnabled = NO;
-        [_cardWrap addSubview:_chevron];
+        [self.contentView addSubview:_chevron];
 
-        // 全尺寸透明触摸区（hitTest 强制转发到这里；左滑手势也挂在它上面）
+        // 全尺寸透明触摸区（hitTest 强制转发到这里，负责"点击进素材库"）
         _tapZone = [[UIControl alloc] init];
         _tapZone.backgroundColor = [UIColor clearColor];
         [_tapZone addTarget:self action:@selector(rowTapped) forControlEvents:UIControlEventTouchUpInside];
         [self.contentView addSubview:_tapZone];
-
-        UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
-        pan.delegate = self;
-        [_tapZone addGestureRecognizer:pan];
 
         [self applySpecifierStyle];
     }
     return self;
 }
 
-// 按 specifier 属性套样式（创建行蓝字无箭头无滑动；模块行黑字带箭头可滑动）
+// 按 specifier 属性套样式（创建行蓝字无箭头；模块行黑字带箭头）
 - (void)applySpecifierStyle {
     PSSpecifier *spec = self.ccvSpec;
-    self.isCreate = [[spec propertyForKey:@"isCreate"] boolValue];
+    BOOL isCreate = [[spec propertyForKey:@"isCreate"] boolValue];
     self.rowTitle.text = spec.name;
-    if (self.isCreate) {
+    if (isCreate) {
         self.rowTitle.textColor = [UIColor colorWithRed:0.0 green:0.48 blue:1.0 alpha:1.0];
         self.chevron.hidden = YES;
-        self.deleteBtn.hidden = YES;
     } else {
         self.rowTitle.textColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *t) {
             return t.userInterfaceStyle == UIUserInterfaceStyleDark
                 ? [UIColor whiteColor] : [UIColor colorWithWhite:0.1 alpha:1.0];
         }];
         self.chevron.hidden = NO;
-        self.deleteBtn.hidden = !self.swipeOpen; // 未滑动时绝不显示
-    }
-}
-
-- (void)closeSwipeAnimated:(BOOL)animated {
-    self.swipeOpen = NO;
-    void (^block)(void) = ^{ self.cardWrap.transform = CGAffineTransformIdentity; };
-    if (animated) [UIView animateWithDuration:0.2 animations:block];
-    else block();
-    if (!self.isCreate) self.deleteBtn.hidden = YES;
-}
-
-// 与表格竖向滚动并行识别：横向滑动归我们，竖向滚动归表格
-- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer shouldRecognizeSimultaneouslyWithOtherGesture:(UIGestureRecognizer *)other {
-    return YES;
-}
-
-- (void)handlePan:(UIPanGestureRecognizer *)p {
-    if (self.isCreate) return; // 创建行不可滑动删除
-    CGPoint t = [p translationInView:self];
-    if (p.state == UIGestureRecognizerStateBegan) {
-        self.dragBase = self.swipeOpen ? -CCVSwipeWidth : 0;
-    } else if (p.state == UIGestureRecognizerStateChanged) {
-        if (fabs(t.x) <= fabs(t.y)) return; // 竖向交给表格滚动
-        CGFloat x = self.dragBase + t.x;
-        if (x > 0) x = 0;
-        if (x < -CCVSwipeWidth) x = -CCVSwipeWidth;
-        self.deleteBtn.hidden = NO; // 一开始滑就露出按钮（在卡片底下，未滑出部分被不透明卡片盖住）
-        self.cardWrap.transform = CGAffineTransformMakeTranslation(x, 0);
-    } else if (p.state == UIGestureRecognizerStateEnded || p.state == UIGestureRecognizerStateCancelled) {
-        if (fabs(t.x) <= fabs(t.y)) return;
-        CGPoint v = [p velocityInView:self];
-        CGFloat x = self.dragBase + t.x;
-        BOOL open = (x < -CCVSwipeWidth / 2.0) || (v.x < -400 && x < 0);
-        self.swipeOpen = open;
-        [UIView animateWithDuration:0.2 animations:^{
-            self.cardWrap.transform = CGAffineTransformMakeTranslation(open ? -CCVSwipeWidth : 0, 0);
-        }];
-        if (!open) self.deleteBtn.hidden = YES;
     }
 }
 
 - (void)rowTapped {
-    if (!self.isCreate && self.swipeOpen) { // 展开态先收起
-        [self closeSwipeAnimated:YES];
-        return;
-    }
     PSSpecifier *spec = self.ccvSpec;
     id target = [spec target];
-    if (self.isCreate) {
+    if ([[spec propertyForKey:@"isCreate"] boolValue]) {
         if ([target respondsToSelector:@selector(createModule:)]) {
             [target performSelector:@selector(createModule:) withObject:spec];
         }
@@ -247,20 +172,8 @@ static const CGFloat CCVSwipeWidth = 76.0;
     }
 }
 
-- (void)deleteTapped {
-    PSSpecifier *spec = self.ccvSpec;
-    id target = [spec target];
-    if ([target respondsToSelector:@selector(deleteModule:)]) {
-        [target performSelector:@selector(deleteModule:) withObject:spec];
-    }
-}
-
-// 展开态：删除按钮区域的触摸给按钮；其余给触摸区
+// 整个 cell 区域的触摸交给 tapZone（防止基类/表格截走导致点不了）
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-    if (!self.isCreate && self.swipeOpen && self.deleteBtn &&
-        [self.deleteBtn pointInside:[self convertPoint:point toView:self.deleteBtn] withEvent:event]) {
-        return self.deleteBtn;
-    }
     if (self.tapZone && [self.tapZone pointInside:[self convertPoint:point toView:self.tapZone] withEvent:event]) {
         return self.tapZone;
     }
@@ -270,7 +183,6 @@ static const CGFloat CCVSwipeWidth = 76.0;
 - (void)refreshCellContentsWithSpecifier:(PSSpecifier *)specifier {
     [super refreshCellContentsWithSpecifier:specifier];
     self.ccvSpec = specifier; // 关键：复用时自己刷新 specifier，不信基类
-    [self closeSwipeAnimated:NO];
     [self applySpecifierStyle];
     self.textLabel.text = @"";
     self.textLabel.hidden = YES;
@@ -281,10 +193,6 @@ static const CGFloat CCVSwipeWidth = 76.0;
     [super layoutSubviews];
     CGFloat w = self.contentView.bounds.size.width;
     CGFloat h = self.contentView.bounds.size.height;
-    self.deleteBtn.frame = CGRectMake(w - CCVSwipeWidth, 0, CCVSwipeWidth, h);
-    self.cardWrap.frame = CGRectMake(0, 0, w, h);
-    UIView *card = self.cardWrap.subviews.firstObject;
-    card.frame = CGRectMake(0, 0, w, h);
     self.rowTitle.frame = CGRectMake(20, (h - 16) / 2, w - 60, 16);
     self.chevron.frame = CGRectMake(w - 34, (h - 18) / 2, 24, 18);
     self.tapZone.frame = self.contentView.bounds;
@@ -401,6 +309,34 @@ static const CGFloat CCVSwipeWidth = 76.0;
     CCVideoLibraryViewController *vc = [[CCVideoLibraryViewController alloc] init];
     vc.moduleIndex = idx;
     [self.navigationController pushViewController:vc animated:YES];
+}
+
+// ---------- 左滑删除（系统原生 trailingSwipeActions，状态由表格管理，reload 后不失效） ----------
+- (BOOL)tableView:(UITableView *)tableView canEditRowAtIndexPath:(NSIndexPath *)indexPath {
+    PSSpecifier *spec = [self ccvSpecifierAtIndexPath:indexPath];
+    return spec && [spec propertyForKey:@"moduleIndex"]; // 仅模块行可左滑，创建行不可
+}
+
+- (void)tableView:(UITableView *)tableView commitEditingStyle:(UITableViewCellEditingStyle)editingStyle forRowAtIndexPath:(NSIndexPath *)indexPath {
+    if (editingStyle == UITableViewCellEditingStyleDelete) {
+        PSSpecifier *spec = [self ccvSpecifierAtIndexPath:indexPath];
+        if (spec) [self deleteModule:spec];
+    }
+}
+
+- (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
+    PSSpecifier *spec = [self ccvSpecifierAtIndexPath:indexPath];
+    if (!spec || ![spec propertyForKey:@"moduleIndex"]) return nil;
+    UIContextualAction *del = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleDestructive
+                                                                      title:@"删除"
+                                                                    handler:^(UIContextualAction *action, UIView *view, void (^completion)(BOOL, BOOL)) {
+        [self deleteModule:spec];
+        completion(YES, YES);
+    }];
+    del.backgroundColor = [UIColor systemRedColor];
+    UISwipeActionsConfiguration *cfg = [UISwipeActionsConfiguration configurationWithActions:@[del]];
+    cfg.performsFirstActionWithFullSwipe = NO; // 整行滑满不触发，必须点删除按钮
+    return cfg;
 }
 
 // 删除模块：第 idx 个删掉，后面模块的键值整体前移，MaxModules 减一。
