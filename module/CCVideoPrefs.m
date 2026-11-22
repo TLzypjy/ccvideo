@@ -61,7 +61,7 @@ void CCVSetMaxModules(NSUInteger n) {
 
 NSString *CCVKeyForModule(NSString *baseKey, NSUInteger moduleIndex) {
     if (moduleIndex <= 1) return baseKey; // 模块 1 用原键，兼容旧数据
-    return [NSString stringWithFormat:@"%@%@", baseKey, (unsigned long)moduleIndex];
+    return [NSString stringWithFormat:@"%@%lu", baseKey, (unsigned long)moduleIndex];
 }
 
 NSString *CCVSelectedVideoNameForModule(NSUInteger moduleIndex) {
