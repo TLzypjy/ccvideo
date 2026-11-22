@@ -35,18 +35,20 @@ static void ccv_darwin_callback(CFNotificationCenterRef center, void *observer,
     _videoContainer.hidden = YES;
     [self.view addSubview:_videoContainer];
 
-    _playerLayer = [AVPlayerLayer playerLayerWithPlayer:self.player];
-    _playerLayer.videoGravity = [self videoGravity];
-    [_videoContainer.layer addSublayer:_playerLayer];
-
-    // 完整适应模式：底层同一播放器铺满 + 模糊，上层完整显示
+    // 图层顺序（底→顶）：铺满视频层 → 模糊层 → 完整视频层
+    // （完整适应 = 底层铺满做模糊背景源，模糊层盖住它，主层完整显示在最上）
     _bgPlayerLayer = [AVPlayerLayer playerLayerWithPlayer:self.player];
     _bgPlayerLayer.videoGravity = AVLayerVideoGravityResizeAspectFill;
     _bgPlayerLayer.hidden = YES;
     [_videoContainer.layer addSublayer:_bgPlayerLayer];
+
     _blurView = [[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleDark]];
     _blurView.hidden = YES;
     [_videoContainer addSubview:_blurView];
+
+    _playerLayer = [AVPlayerLayer playerLayerWithPlayer:self.player];
+    _playerLayer.videoGravity = [self videoGravity];
+    [_videoContainer.layer addSublayer:_playerLayer];
 
     _placeholderLabel = [[UILabel alloc] initWithFrame:self.view.bounds];
     _placeholderLabel.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
