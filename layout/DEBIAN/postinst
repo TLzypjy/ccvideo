@@ -1,0 +1,19 @@
+#!/bin/sh
+# CCVideo: "创建模块"时 SpringBoard(以 mobile 用户运行) 需要把
+# CCVideoPendingBundles/CCVideoN.bundle 拷入 ControlCenter/Bundles。
+# 该目录由 dpkg 安装、root 属主 0755，mobile 无法写入 -> 拷贝静默失败，
+# 新模块注销后永不出现。这里把目标目录放开为可写。
+JBROOT=""
+if [ -d /var/jb ]; then
+  JBROOT="/var/jb"                      # rootless（多巴胺）
+elif [ -n "$JBROOT" ]; then
+  JBROOT="$JBROOT"                      # roothide 环境（dpkg 注入的环境变量，若有）
+elif command -v jbroot >/dev/null 2>&1; then
+  JBROOT=$(jbroot /)                    # roothide jbroot 工具
+fi
+if [ -n "$JBROOT" ]; then
+  chmod 0777 "$JBROOT/Library/ControlCenter/Bundles" 2>/dev/null || true
+  chmod 0755 "$JBROOT/Library/CCVideoPendingBundles" 2>/dev/null || true
+  chmod -R a+rX "$JBROOT/Library/CCVideoPendingBundles" 2>/dev/null || true
+fi
+exit 0

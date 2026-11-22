@@ -99,6 +99,7 @@
             PSSpecifier *mod = [PSSpecifier preferenceSpecifierNamed:[NSString stringWithFormat:@"视频模块%@", @(i)]
                     target:self set:nil get:nil detail:nil cell:PSLinkCell edit:nil];
             [mod setProperty:@(i) forKey:@"moduleIndex"];
+            mod.buttonAction = @selector(openModule:); // PS 标准触发机制（不依赖表代理链路）
             [specs addObject:mod];
         }
 
@@ -134,17 +135,28 @@
 }
 
 // 模块行（黑字）点击 -> 直接进入该模块的素材库选素材
+// specifierAtIndexPath 在 iOS16 上可能返回 nil，兜底按行号取（组头也占一行，row 与 specifiers 下标一一对应）
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     PSSpecifier *spec = [self specifierAtIndexPath:indexPath];
+    if (!spec) {
+        NSArray *specs = [self specifiers];
+        NSUInteger row = indexPath.row;
+        if (specs && row < specs.count) spec = specs[row];
+    }
     if (spec && [spec propertyForKey:@"moduleIndex"]) {
-        NSUInteger idx = [[spec propertyForKey:@"moduleIndex"] integerValue];
-        CCVideoLibraryViewController *vc = [[CCVideoLibraryViewController alloc] init];
-        vc.moduleIndex = idx;
-        [self.navigationController pushViewController:vc animated:YES];
+        [self openModule:spec];
         [tableView deselectRowAtIndexPath:indexPath animated:YES];
         return;
     }
     [super tableView:tableView didSelectRowAtIndexPath:indexPath];
+}
+
+- (void)openModule:(PSSpecifier *)spec {
+    NSUInteger idx = [[spec propertyForKey:@"moduleIndex"] integerValue];
+    if (idx == 0) idx = 1;
+    CCVideoLibraryViewController *vc = [[CCVideoLibraryViewController alloc] init];
+    vc.moduleIndex = idx;
+    [self.navigationController pushViewController:vc animated:YES];
 }
 
 // 创建模块：直接创建（无弹窗、不注销），SpringBoard 侧只拷贝 bundle，下次注销自动载入
