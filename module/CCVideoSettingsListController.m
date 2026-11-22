@@ -36,7 +36,19 @@
             [specs addObject:create];
         }
 
-        // 每个模块的设置内联在主页（模块 1 沿用原分组名，与旧版界面一致）
+        // 显示模式（全局，适用所有模块）
+        PSSpecifier *gMode = [PSSpecifier preferenceSpecifierNamed:@"显示模式"
+                target:self set:nil get:nil detail:nil cell:PSGroupCell edit:nil];
+        [gMode setProperty:@"适用所有模块。裁切填满：保持比例、放大并裁剪超出部分；完整适应：完整显示画面，空白区域用模糊背景补齐；拉伸填满：忽略比例，直接铺满模块。" forKey:@"footerTitle"];
+        [specs addObject:gMode];
+        PSSpecifier *seg = [PSSpecifier preferenceSpecifierNamed:@"显示模式"
+                target:self set:@selector(setDisplayMode:forSpecifier:) get:@selector(getDisplayMode:) detail:nil cell:PSSegmentCell edit:nil];
+        [seg setProperty:@[@"裁切填满", @"完整适应", @"拉伸填满"] forKey:@"validTitles"];
+        [seg setProperty:@[@"裁切填满", @"完整适应", @"拉伸填满"] forKey:@"shortTitles"];
+        [seg setProperty:@[@0, @1, @2] forKey:@"validValues"];
+        [specs addObject:seg];
+
+        // 每个模块的尺寸设置内联在主页（模块 1 沿用原分组名，与旧版界面一致）
         for (NSUInteger i = 1; i <= n; i++) {
             PSSpecifier *g2 = [PSSpecifier preferenceSpecifierNamed:(i == 1 ? @"模块尺寸" : [NSString stringWithFormat:@"视频模块%lu 尺寸", (unsigned long)i])
                     target:self set:nil get:nil detail:nil cell:PSGroupCell edit:nil];
@@ -44,16 +56,6 @@
             [specs addObject:g2];
             [specs addObject:[self sliderForModule:i named:@"X" selBase:@"PortraitW" key:CCVKeyForModule(CCVKeyPortraitW, i) other:CCVKeyForModule(CCVKeyLandscapeW, i)]];
             [specs addObject:[self sliderForModule:i named:@"Y" selBase:@"PortraitH" key:CCVKeyForModule(CCVKeyPortraitH, i) other:CCVKeyForModule(CCVKeyLandscapeH, i)]];
-
-            PSSpecifier *g4 = [PSSpecifier preferenceSpecifierNamed:(i == 1 ? @"播放" : [NSString stringWithFormat:@"视频模块%lu 播放", (unsigned long)i])
-                    target:self set:nil get:nil detail:nil cell:PSGroupCell edit:nil];
-            if (i == 1) [g4 setProperty:@"画面填充：铺满模块（可能裁切）；关闭则完整显示（可能留黑边）。" forKey:@"footerTitle"];
-            [specs addObject:g4];
-
-            PSSpecifier *fill = [PSSpecifier preferenceSpecifierNamed:(i == 1 ? @"画面填充" : [NSString stringWithFormat:@"视频模块%lu 画面填充", (unsigned long)i])
-                    target:self set:@selector(setFill:forSpecifier:) get:@selector(getFill:) detail:nil cell:PSSwitchCell edit:nil];
-            [fill setProperty:@(i) forKey:@"moduleIndex"];
-            [specs addObject:fill];
         }
 
         _specifiers = specs;
@@ -134,17 +136,14 @@
     CCVPostSizeChange();
 }
 
-// ---------- 每模块画面填充开关 ----------
-- (id)getFill:(PSSpecifier *)spec {
-    NSUInteger idx = [[spec propertyForKey:@"moduleIndex"] integerValue];
-    if (idx == 0) idx = 1;
-    return @([CCVPrefs() boolForKey:CCVKeyForModule(CCVKeyAspectFill, idx)]);
+// ---------- 全局显示模式（适用所有模块） ----------
+- (id)getDisplayMode:(PSSpecifier *)spec {
+    return @(CCVDisplayMode());
 }
 
-- (void)setFill:(id)value forSpecifier:(PSSpecifier *)spec {
-    NSUInteger idx = [[spec propertyForKey:@"moduleIndex"] integerValue];
-    if (idx == 0) idx = 1;
-    [CCVPrefs() setBool:[(NSNumber *)value boolValue] forKey:CCVKeyForModule(CCVKeyAspectFill, idx)];
+- (void)setDisplayMode:(id)value forSpecifier:(PSSpecifier *)spec {
+    [CCVPrefs() setInteger:[(NSNumber *)value integerValue] forKey:CCVKeyDisplayMode];
+    [CCVPrefs() synchronize];
     CCVPostDarwin(CCVDarwinSettingsChanged);
 }
 

@@ -4,7 +4,9 @@
 
 @interface CCVideoContentViewController ()
 @property (nonatomic, strong) AVQueuePlayer *player;
-@property (nonatomic, strong) AVPlayerLayer *playerLayer;
+@property (nonatomic, strong) AVPlayerLayer *playerLayer;   // 主视频层（显示模式决定 gravity）
+@property (nonatomic, strong) AVPlayerLayer *bgPlayerLayer; // 完整适应模式的模糊背景底层（铺满）
+@property (nonatomic, strong) UIVisualEffectView *blurView; // 背景模糊
 @property (nonatomic, strong) AVPlayerLooper *looper;
 @property (nonatomic, strong) UIView *videoContainer;
 @property (nonatomic, strong) UILabel *placeholderLabel;
@@ -36,6 +38,15 @@ static void ccv_darwin_callback(CFNotificationCenterRef center, void *observer,
     _playerLayer = [AVPlayerLayer playerLayerWithPlayer:self.player];
     _playerLayer.videoGravity = [self videoGravity];
     [_videoContainer.layer addSublayer:_playerLayer];
+
+    // 完整适应模式：底层同一播放器铺满 + 模糊，上层完整显示
+    _bgPlayerLayer = [AVPlayerLayer playerLayerWithPlayer:self.player];
+    _bgPlayerLayer.videoGravity = AVLayerVideoGravityResizeAspectFill;
+    _bgPlayerLayer.hidden = YES;
+    [_videoContainer.layer addSublayer:_bgPlayerLayer];
+    _blurView = [[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleDark]];
+    _blurView.hidden = YES;
+    [_videoContainer addSubview:_blurView];
 
     _placeholderLabel = [[UILabel alloc] initWithFrame:self.view.bounds];
     _placeholderLabel.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
@@ -70,9 +81,21 @@ static void ccv_darwin_callback(CFNotificationCenterRef center, void *observer,
     return _player;
 }
 
+// 显示模式（全局）：0=裁切填满 1=完整适应(模糊背景补边) 2=拉伸填满
 - (NSString *)videoGravity {
-    return [CCVPrefs() boolForKey:CCVKeyForModule(CCVKeyAspectFill, self.moduleIndex)]
-        ? AVLayerVideoGravityResizeAspectFill : AVLayerVideoGravityResizeAspect;
+    switch (CCVDisplayMode()) {
+        case 0:  return AVLayerVideoGravityResizeAspectFill;
+        case 2:  return AVLayerVideoGravityResize;
+        default: return AVLayerVideoGravityResizeAspect;
+    }
+}
+
+- (void)applyDisplayMode {
+    NSInteger mode = CCVDisplayMode();
+    BOOL fit = (mode == 1);
+    self.bgPlayerLayer.hidden = !fit;
+    self.blurView.hidden = !fit;
+    self.playerLayer.videoGravity = [self videoGravity];
 }
 
 - (void)loadVideoIfNeeded {
@@ -96,14 +119,14 @@ static void ccv_darwin_callback(CFNotificationCenterRef center, void *observer,
 
     AVPlayerItem *item = [AVPlayerItem playerItemWithURL:[NSURL fileURLWithPath:path]];
     self.looper = [AVPlayerLooper playerLooperWithPlayer:self.player templateItem:item];
-    self.playerLayer.videoGravity = [self videoGravity];
+    [self applyDisplayMode];
     if (self.wantsPlayback) [self.player play];
 }
 
 - (void)settingsChanged {
     // 先同步偏好再读取
     CFPreferencesAppSynchronize((__bridge CFStringRef)CCVBundleID);
-    self.playerLayer.videoGravity = [self videoGravity];
+    [self applyDisplayMode];
     [self loadVideoIfNeeded];
 }
 
@@ -153,6 +176,8 @@ static void ccv_darwin_callback(CFNotificationCenterRef center, void *observer,
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
     self.videoContainer.frame = self.view.bounds;
+    self.bgPlayerLayer.frame = self.videoContainer.bounds;
+    self.blurView.frame = self.videoContainer.bounds;
     self.playerLayer.frame = self.videoContainer.bounds;
     CGFloat r = MIN(self.view.bounds.size.width, self.view.bounds.size.height) * 0.22;
     self.videoContainer.layer.cornerRadius = MIN(MAX(r, 12.0), 40.0);

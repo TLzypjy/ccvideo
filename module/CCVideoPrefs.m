@@ -11,6 +11,7 @@ NSString * const CCVKeyPortraitH = @"portraitH";
 NSString * const CCVKeyLandscapeW = @"landscapeW";
 NSString * const CCVKeyLandscapeH = @"landscapeH";
 NSString * const CCVKeyAspectFill = @"aspectFill";
+NSString * const CCVKeyDisplayMode = @"DisplayMode";
 NSString * const CCVKeyMaxModules = @"MaxModules";
 
 NSString * const CCVDarwinSettingsChanged = @"com.wuba.ccvideo/SettingsChanged";
@@ -62,6 +63,20 @@ void CCVSetMaxModules(NSUInteger n) {
 NSString *CCVKeyForModule(NSString *baseKey, NSUInteger moduleIndex) {
     if (moduleIndex <= 1) return baseKey; // 模块 1 用原键，兼容旧数据
     return [NSString stringWithFormat:@"%@%lu", baseKey, (unsigned long)moduleIndex];
+}
+
+NSInteger CCVDisplayMode(void) {
+    NSInteger v;
+    id obj = [CCVPrefs() objectForKey:CCVKeyDisplayMode];
+    if (obj == nil) {
+        // 迁移：旧版"画面填充"（模块1） YES=裁切填满 NO=完整适应
+        v = [CCVPrefs() boolForKey:CCVKeyForModule(CCVKeyAspectFill, 1)] ? 0 : 1;
+    } else {
+        v = [obj integerValue];
+    }
+    if (v < 0) v = 0;
+    if (v > 2) v = 2;
+    return v;
 }
 
 NSString *CCVSelectedVideoNameForModule(NSUInteger moduleIndex) {

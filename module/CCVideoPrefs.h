@@ -15,7 +15,8 @@ FOUNDATION_EXPORT NSString * const CCVKeyPortraitW;     // 竖屏宽
 FOUNDATION_EXPORT NSString * const CCVKeyPortraitH;     // 竖屏高
 FOUNDATION_EXPORT NSString * const CCVKeyLandscapeW;    // 横屏宽
 FOUNDATION_EXPORT NSString * const CCVKeyLandscapeH;    // 横屏高
-FOUNDATION_EXPORT NSString * const CCVKeyAspectFill;    // 画面填充模式
+FOUNDATION_EXPORT NSString * const CCVKeyAspectFill;    // 画面填充模式（旧版，仅迁移用）
+FOUNDATION_EXPORT NSString * const CCVKeyDisplayMode;   // 显示模式 0=裁切填满 1=完整适应(模糊背景) 2=拉伸填满（全局，适用所有模块）
 FOUNDATION_EXPORT NSString * const CCVKeyMaxModules;    // 已创建模块数（1~8）
 
 // Darwin 通知
@@ -33,6 +34,7 @@ void CCVPostSizeChange(void);          // SettingsChanged + ReloadSizes
 NSUInteger CCVMaxModules(void);                          // 已创建模块数，1~8
 void CCVSetMaxModules(NSUInteger n);
 NSString *CCVKeyForModule(NSString *baseKey, NSUInteger moduleIndex); // 模块 1 = 原键（兼容旧数据）
+NSInteger CCVDisplayMode(void);                          // 全局显示模式，0~2（自动从旧画面填充键迁移）
 NSString *CCVSelectedVideoNameForModule(NSUInteger moduleIndex);
 void CCVSetSelectedVideo(NSString *name, NSUInteger moduleIndex);
 NSUInteger CCVSizeForModule(NSString *baseKey, NSUInteger moduleIndex); // 读取并钳位 1~4
