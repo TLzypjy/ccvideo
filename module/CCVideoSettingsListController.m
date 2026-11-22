@@ -75,12 +75,14 @@
 
 @end
 
-// ---------- 自定义模块行 cell：白卡黑字+箭头，点击用 tap 手势自己处理 ----------
+// ---------- 自定义模块行 cell：白卡黑字+箭头，整块触摸区自己处理点击 ----------
 // PSLinkCell 无 detail 时 iOS16 渲染成灰色不可点行（didSelect 都不触发），
-// 所以模块行不再依赖系统行为：cellClass 自绘 + UITapGestureRecognizer 直达 openModule:
+// 且基类会自己画一遍 specifier 标题（与我们的大字叠加）。所以：
+// 1) init/refresh 都隐藏基类文字；2) 全尺寸透明触摸区 + hitTest 强制转发。
 @interface CCVModuleCell : PSTableCell
 @property (nonatomic, strong) UILabel *modTitle;
 @property (nonatomic, strong) UILabel *chevron;
+@property (nonatomic, strong) UIControl *tapZone;
 @end
 
 @implementation CCVModuleCell
@@ -88,9 +90,14 @@
 - (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)reuseIdentifier specifier:(PSSpecifier *)specifier {
     if (self = [super initWithStyle:style reuseIdentifier:reuseIdentifier specifier:specifier]) {
         self.backgroundColor = [UIColor clearColor];
-        self.selectionStyle = UITableViewCellSelectionStyleDefault;
+        self.selectionStyle = UITableViewCellSelectionStyleNone;
         self.userInteractionEnabled = YES;
         self.contentView.userInteractionEnabled = YES;
+
+        // 隐藏基类按 specifier name 画的行标题（否则与我们的标题叠成大字）
+        self.textLabel.text = @"";
+        self.textLabel.hidden = YES;
+        if (self.detailTextLabel) self.detailTextLabel.hidden = YES;
 
         UIView *card = [[UIView alloc] init];
         card.backgroundColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *t) {
@@ -99,6 +106,7 @@
                 : [UIColor colorWithWhite:1.0 alpha:0.72];
         }];
         card.layer.cornerRadius = 22;
+        card.userInteractionEnabled = NO;
         self.backgroundView = card;
 
         _modTitle = [[UILabel alloc] init];
@@ -108,6 +116,7 @@
             return t.userInterfaceStyle == UIUserInterfaceStyleDark
                 ? [UIColor whiteColor] : [UIColor colorWithWhite:0.1 alpha:1.0];
         }];
+        _modTitle.userInteractionEnabled = NO;
         [self.contentView addSubview:_modTitle];
 
         _chevron = [[UILabel alloc] init];
@@ -119,11 +128,14 @@
                 ? [UIColor colorWithWhite:0.5 alpha:1.0]
                 : [UIColor colorWithWhite:0.75 alpha:1.0];
         }];
+        _chevron.userInteractionEnabled = NO;
         [self.contentView addSubview:_chevron];
 
-        UITapGestureRecognizer *tg = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(moduleTapped)];
-        tg.cancelsTouchesInView = NO;
-        [self addGestureRecognizer:tg];
+        // 全尺寸透明触摸区（hitTest 强制转发到这里，与显示模式分段按钮同一机制）
+        _tapZone = [[UIControl alloc] init];
+        _tapZone.backgroundColor = [UIColor clearColor];
+        [_tapZone addTarget:self action:@selector(moduleTapped) forControlEvents:UIControlEventTouchUpInside];
+        [self.contentView addSubview:_tapZone];
     }
     return self;
 }
@@ -136,10 +148,17 @@
     }
 }
 
+// 整个 cell 区域的触摸全部交给 tapZone（防止基类/表格截走导致点不了）
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+    if (self.tapZone && [self.tapZone pointInside:[self convertPoint:point toView:self.tapZone] withEvent:event]) {
+        return self.tapZone;
+    }
+    return [super hitTest:point withEvent:event];
+}
+
 - (void)refreshCellContentsWithSpecifier:(PSSpecifier *)specifier {
     [super refreshCellContentsWithSpecifier:specifier];
     self.modTitle.text = specifier.name;
-    // 隐藏基类自带的灰字行标题
     self.textLabel.text = @"";
     self.textLabel.hidden = YES;
     if (self.detailTextLabel) self.detailTextLabel.hidden = YES;
@@ -151,6 +170,7 @@
     CGFloat h = self.contentView.bounds.size.height;
     self.modTitle.frame = CGRectMake(20, (h - 22) / 2, w - 60, 22);
     self.chevron.frame = CGRectMake(w - 34, (h - 24) / 2, 24, 24);
+    self.tapZone.frame = self.contentView.bounds;
 }
 
 @end
@@ -233,8 +253,8 @@
 }
 
 - (void)openModule:(PSSpecifier *)spec {
-    // 去重：tap 手势/buttonAction/didSelect 三条路都可能触发，已在跳转中就不再推
-    if (self.navigationController && ![self.navigationController.topViewController isEqual:self]) return;
+    // 去重：素材库已经推到顶就不再推（tap 触摸区/didSelect/buttonAction 可能多路触发）
+    if ([self.navigationController.topViewController isKindOfClass:[CCVideoLibraryViewController class]]) return;
     NSUInteger idx = [[spec propertyForKey:@"moduleIndex"] integerValue];
     if (idx == 0) idx = 1;
     CCVideoLibraryViewController *vc = [[CCVideoLibraryViewController alloc] init];
@@ -311,6 +331,11 @@
 // 自定义显示模式卡片/模块行：行高自己接管（PSListController 下 +preferredHeightForSpecifier: 不可靠）
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
     PSSpecifier *spec = [self specifierAtIndexPath:indexPath];
+    if (!spec) {
+        NSArray *specs = [self specifiers];
+        NSUInteger row = indexPath.row;
+        if (specs && row < specs.count) spec = specs[row];
+    }
     Class cls = [spec propertyForKey:@"cellClass"];
     if (cls == [CCVDisplayModeCell class]) {
         return [CCVDisplayModeCell preferredHeight];
