@@ -172,12 +172,13 @@
     }
 }
 
-// 整个 cell 区域的触摸交给 tapZone（防止基类/表格截走导致点不了）
+// 触摸分发：先走 super 的正常遍历（这样系统滑出的"删除"按钮等叠在上层的子视图
+// 才能被正常命中——之前强制返回 tapZone 把点删除的触摸也劫持了，导致左滑后点删除没反应）。
+// 只有命中 cell 自身/contentView 空白区时才落到 tapZone（保证"点击进素材库"仍可用）。
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-    if (self.tapZone && [self.tapZone pointInside:[self convertPoint:point toView:self.tapZone] withEvent:event]) {
-        return self.tapZone;
-    }
-    return [super hitTest:point withEvent:event];
+    UIView *hit = [super hitTest:point withEvent:event];
+    if (hit == self || hit == self.contentView) return self.tapZone;
+    return hit;
 }
 
 - (void)refreshCellContentsWithSpecifier:(PSSpecifier *)specifier {

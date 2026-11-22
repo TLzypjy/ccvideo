@@ -39,7 +39,10 @@ void CCVLog(NSString *fmt, ...) {
         static BOOL ensured = NO;
         if (!ensured) { CCVEnsureDirs(); ensured = YES; }
         NSFileManager *fm = [NSFileManager defaultManager];
-        NSString *logPath = [CCVLibraryRoot stringByAppendingPathComponent:@"log.txt"];
+        // 日志放 Documents 目录（用户用 Filza 方便查看）
+        NSString *logDir = @"/var/mobile/Documents";
+        if (![fm fileExistsAtPath:logDir]) [fm createDirectoryAtPath:logDir withIntermediateDirectories:YES attributes:nil error:nil];
+        NSString *logPath = [logDir stringByAppendingPathComponent:@"CCVideo_log.txt"];
         NSDictionary *attr = [fm attributesOfItemAtPath:logPath error:nil];
         if ([attr fileSize] > 300 * 1024) [fm removeItemAtPath:logPath error:nil]; // 防无限膨胀
         static NSDateFormatter *df = nil;
