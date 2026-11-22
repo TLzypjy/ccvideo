@@ -2,6 +2,96 @@
 #import "CCVideoPrefs.h"
 #import "CCVideoLibraryViewController.h"
 
+// ---------- 自定义卡片 cell：显示模式（标题 + 三挡分段 + 卡底说明文字） ----------
+@interface CCVDisplayModeCell : PSTableCell
+@property (nonatomic, strong) UILabel *titleLabel;
+@property (nonatomic, strong) UISegmentedControl *segment;
+@property (nonatomic, strong) UILabel *descLabel;
++ (CGFloat)preferredHeight;
+@end
+
+@implementation CCVDisplayModeCell
+
++ (NSString *)descText {
+    return @"选择图片和视频的显示方式：\n· 裁切填满：保持比例、放大并裁剪超出部分\n· 完整适应：完整显示原图，空白区域用模糊背景补齐\n· 拉伸填满：忽略比例，直接铺满模块";
+}
+
++ (CGFloat)descHeightForWidth:(CGFloat)w {
+    CGRect b = [[self descText] boundingRectWithSize:CGSizeMake(w, CGFLOAT_MAX)
+                                             options:NSStringDrawingUsesLineFragmentOrigin
+                                          attributes:@{NSFontAttributeName:[UIFont systemFontOfSize:12]}
+                                             context:nil];
+    return ceil(b.size.height);
+}
+
++ (CGFloat)preferredHeight {
+    // 上边距16 + 标题22 + 间距12 + 分段32 + 间距12 + 说明 + 下边距16
+    return 16 + 22 + 12 + 32 + 12 + [self descHeightForWidth:335] + 16;
+}
+
+- (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)reuseIdentifier specifier:(PSSpecifier *)specifier {
+    if (self = [super initWithStyle:style reuseIdentifier:reuseIdentifier specifier:specifier]) {
+        self.backgroundColor = [UIColor clearColor];
+        self.backgroundView = nil;
+        self.selectionStyle = UITableViewCellSelectionStyleNone;
+
+        // 卡片背景（跟随深浅色）
+        UIView *card = [[UIView alloc] init];
+        card.backgroundColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *t) {
+            return t.userInterfaceStyle == UIUserInterfaceStyleDark
+                ? [UIColor colorWithWhite:0.11 alpha:1.0]
+                : [UIColor whiteColor];
+        }];
+        card.layer.cornerRadius = 22;
+        self.backgroundView = card;
+
+        _titleLabel = [[UILabel alloc] init];
+        _titleLabel.text = @"显示模式";
+        _titleLabel.font = [UIFont boldSystemFontOfSize:17];
+        _titleLabel.textColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *t) {
+            return t.userInterfaceStyle == UIUserInterfaceStyleDark
+                ? [UIColor whiteColor] : [UIColor colorWithWhite:0.1 alpha:1.0];
+        }];
+        [self.contentView addSubview:_titleLabel];
+
+        _segment = [[UISegmentedControl alloc] initWithItems:@[@"裁切填满", @"完整适应", @"拉伸填满"]];
+        _segment.selectedSegmentIndex = CCVDisplayMode();
+        if (specifier.target) {
+            [_segment addTarget:specifier.target action:@selector(displayModeChanged:) forControlEvents:UIControlEventValueChanged];
+        }
+        [self.contentView addSubview:_segment];
+
+        _descLabel = [[UILabel alloc] init];
+        _descLabel.text = [CCVDisplayModeCell descText];
+        _descLabel.font = [UIFont systemFontOfSize:12];
+        _descLabel.numberOfLines = 0;
+        _descLabel.textColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *t) {
+            return t.userInterfaceStyle == UIUserInterfaceStyleDark
+                ? [UIColor colorWithWhite:0.65 alpha:1.0]
+                : [UIColor colorWithWhite:0.45 alpha:1.0];
+        }];
+        [self.contentView addSubview:_descLabel];
+    }
+    return self;
+}
+
+- (void)refreshCellContentsWithSpecifier:(PSSpecifier *)specifier {
+    [super refreshCellContentsWithSpecifier:specifier];
+    if (_segment) _segment.selectedSegmentIndex = CCVDisplayMode();
+}
+
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    CGFloat w = self.contentView.bounds.size.width;
+    CGFloat pad = 20;
+    self.titleLabel.frame = CGRectMake(pad, 16, w - pad * 2, 22);
+    self.segment.frame = CGRectMake(pad, 16 + 22 + 12, w - pad * 2, 32);
+    CGFloat ty = 16 + 22 + 12 + 32 + 12;
+    self.descLabel.frame = CGRectMake(pad, ty, w - pad * 2, [CCVDisplayModeCell descHeightForWidth:w - pad * 2]);
+}
+
+@end
+
 // ---------- 主页：模块列表 + 创建模块 ----------
 @implementation CCVideoSettingsListController
 
@@ -36,17 +126,14 @@
             [specs addObject:create];
         }
 
-        // 显示模式（全局，适用所有模块）
-        PSSpecifier *gMode = [PSSpecifier preferenceSpecifierNamed:@"显示模式"
+        // 显示模式（全局，一张卡片：标题 + 三挡分段 + 卡底说明）
+        PSSpecifier *gMode = [PSSpecifier preferenceSpecifierNamed:@""
                 target:self set:nil get:nil detail:nil cell:PSGroupCell edit:nil];
-        [gMode setProperty:@"适用所有模块。裁切填满：保持比例、放大并裁剪超出部分；完整适应：完整显示画面，空白区域用模糊背景补齐；拉伸填满：忽略比例，直接铺满模块。" forKey:@"footerTitle"];
         [specs addObject:gMode];
-        PSSpecifier *seg = [PSSpecifier preferenceSpecifierNamed:@"显示模式"
-                target:self set:@selector(setDisplayMode:forSpecifier:) get:@selector(getDisplayMode:) detail:nil cell:PSSegmentCell edit:nil];
-        [seg setProperty:@[@"裁切填满", @"完整适应", @"拉伸填满"] forKey:@"validTitles"];
-        [seg setProperty:@[@"裁切填满", @"完整适应", @"拉伸填满"] forKey:@"shortTitles"];
-        [seg setProperty:@[@0, @1, @2] forKey:@"validValues"];
-        [specs addObject:seg];
+        PSSpecifier *dm = [PSSpecifier preferenceSpecifierNamed:@"显示模式"
+                target:self set:nil get:nil detail:nil cell:PSLinkCell edit:nil];
+        [dm setProperty:[CCVDisplayModeCell class] forKey:@"cellClass"];
+        [specs addObject:dm];
 
         // 每个模块的尺寸设置内联在主页（模块 1 沿用原分组名，与旧版界面一致）
         for (NSUInteger i = 1; i <= n; i++) {
@@ -137,14 +224,19 @@
 }
 
 // ---------- 全局显示模式（适用所有模块） ----------
-- (id)getDisplayMode:(PSSpecifier *)spec {
-    return @(CCVDisplayMode());
-}
-
-- (void)setDisplayMode:(id)value forSpecifier:(PSSpecifier *)spec {
-    [CCVPrefs() setInteger:[(NSNumber *)value integerValue] forKey:CCVKeyDisplayMode];
+- (void)displayModeChanged:(UISegmentedControl *)seg {
+    [CCVPrefs() setInteger:seg.selectedSegmentIndex forKey:CCVKeyDisplayMode];
     [CCVPrefs() synchronize];
     CCVPostDarwin(CCVDarwinSettingsChanged);
+}
+
+// 自定义显示模式卡片：行高自己接管（PSListController 下 +preferredHeightForSpecifier: 不可靠）
+- (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
+    PSSpecifier *spec = [self specifierAtIndexPath:indexPath];
+    if (spec && [spec propertyForKey:@"cellClass"] == [CCVDisplayModeCell class]) {
+        return [CCVDisplayModeCell preferredHeight];
+    }
+    return [super tableView:tableView heightForRowAtIndexPath:indexPath];
 }
 
 @end

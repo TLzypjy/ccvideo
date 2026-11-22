@@ -1,7 +1,7 @@
 Package: com.wuba.ccvideo
 Name: CCVideo 视频模块
 Depends: com.opa334.ccsupport, mobilesubstrate
-Version: 0.1.2
+Version: 0.1.3
 Architecture: iphoneos-arm
 Description: 控制中心视频播放模块：支持创建最多 8 个模块，素材库导入/选择，静音循环播放，模块大小可调。
 Maintainer: wuba
