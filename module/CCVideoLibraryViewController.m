@@ -277,7 +277,7 @@ static const char kCCVNameKey = 0;
 
     // 选中圆点（编辑态隐藏）
     if (!_editMode) {
-        BOOL on = [CCVSelectedVideoName() isEqualToString:name];
+        BOOL on = [CCVSelectedVideoNameForModule([self index]) isEqualToString:name];
         UIView *dot = [[UIView alloc] initWithFrame:CGRectMake(6 + cardW / 2 - 9, imgH + 33, 18, 18)];
         [[dot layer] setCornerRadius:9.0];
         [[dot layer] setMasksToBounds:YES];
@@ -297,10 +297,13 @@ static const char kCCVNameKey = 0;
     [self selectVideoNamed:[_videos objectAtIndex:(NSUInteger)row]];
 }
 
+- (NSUInteger)index {
+    return self.moduleIndex == 0 ? 1 : self.moduleIndex;
+}
+
 - (void)selectVideoNamed:(NSString *)name {
     if (!name || _editMode) return;
-    [CCVPrefs() setObject:name forKey:CCVKeySelectedVideo];
-    [CCVPrefs() synchronize];
+    CCVSetSelectedVideo(name, [self index]);
     CCVPostDarwin(CCVDarwinSettingsChanged);
     [_cv reloadData];
 }
@@ -441,8 +444,8 @@ static const char kCCVNameKey = 0;
     NSString *oldThumb = CCVThumbPathForVideoName(old);
     NSString *newThumb = CCVThumbPathForVideoName(newNameFull);
     if ([fm fileExistsAtPath:oldThumb]) [fm moveItemAtPath:oldThumb toPath:newThumb error:nil];
-    if ([CCVSelectedVideoName() isEqualToString:old]) {
-        [CCVPrefs() setObject:newNameFull forKey:CCVKeySelectedVideo];
+    if ([CCVSelectedVideoNameForModule([self index]) isEqualToString:old]) {
+        CCVSetSelectedVideo(newNameFull, [self index]);
         [CCVPrefs() synchronize];
         CCVPostDarwin(CCVDarwinSettingsChanged);
     }
@@ -462,8 +465,8 @@ static const char kCCVNameKey = 0;
         NSFileManager *fm = [NSFileManager defaultManager];
         [fm removeItemAtPath:CCVVideoPathForName(name) error:nil];
         [fm removeItemAtPath:CCVThumbPathForVideoName(name) error:nil];
-        if ([CCVSelectedVideoName() isEqualToString:name]) {
-            [CCVPrefs() removeObjectForKey:CCVKeySelectedVideo];
+        if ([CCVSelectedVideoNameForModule([self index]) isEqualToString:name]) {
+            CCVSetSelectedVideo(@"", [self index]);
             [CCVPrefs() synchronize];
             CCVPostDarwin(CCVDarwinSettingsChanged);
         }

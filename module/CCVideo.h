@@ -14,7 +14,27 @@ typedef struct CCUILayoutSize {
 
 NS_ASSUME_NONNULL_BEGIN
 
-@interface CCVideoModule : NSObject <CCUIContentModule>
+// 多模块：每个 bundle 的 NSPrincipalClass 指向一个编号子类（CCVideoModule / CCVideoModule2~8），
+// 编号决定读取哪组偏好键。全部逻辑在基类 CCVideoModuleBase。
+@interface CCVideoModuleBase : NSObject <CCUIContentModule>
++ (NSUInteger)moduleIndex;
+@end
+
+@interface CCVideoModule : CCVideoModuleBase   // 模块 1（CCVideo.bundle）
+@end
+@interface CCVideoModule2 : CCVideoModuleBase
+@end
+@interface CCVideoModule3 : CCVideoModuleBase
+@end
+@interface CCVideoModule4 : CCVideoModuleBase
+@end
+@interface CCVideoModule5 : CCVideoModuleBase
+@end
+@interface CCVideoModule6 : CCVideoModuleBase
+@end
+@interface CCVideoModule7 : CCVideoModuleBase
+@end
+@interface CCVideoModule8 : CCVideoModuleBase
 @end
 
 NS_ASSUME_NONNULL_END

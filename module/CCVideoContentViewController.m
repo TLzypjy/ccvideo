@@ -44,7 +44,7 @@ static void ccv_darwin_callback(CFNotificationCenterRef center, void *observer,
     _placeholderLabel.font = [UIFont systemFontOfSize:11];
     _placeholderLabel.textAlignment = NSTextAlignmentCenter;
     _placeholderLabel.numberOfLines = 0;
-    _placeholderLabel.text = @"视频模块\n\n在设置 → 控制中心 → 视频模块 → 素材库\n导入并选择视频";
+    _placeholderLabel.text = @"视频模块\n\n在设置 → 视频模块 → 素材库\n导入并选择视频";
     [self.view addSubview:_placeholderLabel];
 
     CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(),
@@ -71,12 +71,12 @@ static void ccv_darwin_callback(CFNotificationCenterRef center, void *observer,
 }
 
 - (NSString *)videoGravity {
-    return [CCVPrefs() boolForKey:CCVKeyAspectFill] ? AVLayerVideoGravityResizeAspectFill
-                                                    : AVLayerVideoGravityResizeAspect;
+    return [CCVPrefs() boolForKey:CCVKeyForModule(CCVKeyAspectFill, self.moduleIndex)]
+        ? AVLayerVideoGravityResizeAspectFill : AVLayerVideoGravityResizeAspect;
 }
 
 - (void)loadVideoIfNeeded {
-    NSString *name = CCVSelectedVideoName();
+    NSString *name = CCVSelectedVideoNameForModule(self.moduleIndex);
     if ([name isEqualToString:self.loadedVideoName ?: @""]) return;
     self.loadedVideoName = name;
 

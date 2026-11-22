@@ -11,6 +11,7 @@ NSString * const CCVKeyPortraitH = @"portraitH";
 NSString * const CCVKeyLandscapeW = @"landscapeW";
 NSString * const CCVKeyLandscapeH = @"landscapeH";
 NSString * const CCVKeyAspectFill = @"aspectFill";
+NSString * const CCVKeyMaxModules = @"MaxModules";
 
 NSString * const CCVDarwinSettingsChanged = @"com.wuba.ccvideo/SettingsChanged";
 NSString * const CCVDarwinReloadSizes = @"com.opa334.ccsupport/ReloadSizes";
@@ -41,6 +42,41 @@ void CCVPostDarwin(NSString *name) {
 void CCVPostSizeChange(void) {
     CCVPostDarwin(CCVDarwinSettingsChanged);
     CCVPostDarwin(CCVDarwinReloadSizes);
+}
+
+// ---------- 多模块 ----------
+NSUInteger CCVMaxModules(void) {
+    NSInteger v = [CCVPrefs() integerForKey:CCVKeyMaxModules];
+    if (v < 1) v = 1;
+    if (v > CCV_MAX_MODULES) v = CCV_MAX_MODULES;
+    return (NSUInteger)v;
+}
+
+void CCVSetMaxModules(NSUInteger n) {
+    if (n < 1) n = 1;
+    if (n > CCV_MAX_MODULES) n = CCV_MAX_MODULES;
+    [CCVPrefs() setInteger:(NSInteger)n forKey:CCVKeyMaxModules];
+    [CCVPrefs() synchronize];
+}
+
+NSString *CCVKeyForModule(NSString *baseKey, NSUInteger moduleIndex) {
+    if (moduleIndex <= 1) return baseKey; // 模块 1 用原键，兼容旧数据
+    return [NSString stringWithFormat:@"%@%@", baseKey, (unsigned long)moduleIndex];
+}
+
+NSString *CCVSelectedVideoNameForModule(NSUInteger moduleIndex) {
+    return [CCVPrefs() stringForKey:CCVKeyForModule(CCVKeySelectedVideo, moduleIndex)] ?: @"";
+}
+
+void CCVSetSelectedVideo(NSString *name, NSUInteger moduleIndex) {
+    [CCVPrefs() setObject:name forKey:CCVKeyForModule(CCVKeySelectedVideo, moduleIndex)];
+    [CCVPrefs() synchronize];
+}
+
+NSUInteger CCVSizeForModule(NSString *baseKey, NSUInteger moduleIndex) {
+    NSInteger v = [CCVPrefs() integerForKey:CCVKeyForModule(baseKey, moduleIndex)];
+    if (v <= 0) v = 2;
+    return (NSUInteger)MIN(MAX(v, (NSInteger)1), (NSInteger)4);
 }
 
 NSString *CCVSelectedVideoName(void) {

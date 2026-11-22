@@ -15,11 +15,11 @@
 		<key>CFBundlePackageType</key>
 		<string>BNDL</string>
 		<key>CFBundleShortVersionString</key>
-		<string>0.0.9</string>
+		<string>0.1.0</string>
 		<key>CFBundleVersion</key>
 		<string>2</string>
 		<key>CFBundleDisplayName</key>
-		<string>视频模块</string>
+		<string>视频模块1</string>
 		<key>MinimumOSVersion</key>
 		<string>14.0</string>
 		<key>UIDeviceFamily</key>
