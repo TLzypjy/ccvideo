@@ -94,7 +94,8 @@
 - (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)reuseIdentifier specifier:(PSSpecifier *)specifier {
     if (self = [super initWithStyle:style reuseIdentifier:reuseIdentifier specifier:specifier]) {
         self.ccvSpec = specifier;
-        self.backgroundColor = [UIColor clearColor];
+        // 注意：不要设 backgroundColor=clear！那会干掉分组背景（v0.1.20 整组没白底的根因）。
+        // 背景交给系统默认分组样式/PS 的 cellForRow 机制：同组多行自动连成一张卡。
         self.selectionStyle = UITableViewCellSelectionStyleNone;
         self.userInteractionEnabled = YES;
         self.contentView.userInteractionEnabled = YES;
@@ -214,7 +215,8 @@
 
 // ---------- 主页：模块列表 + 创建模块 ----------
 @interface CCVideoSettingsListController () <UIGestureRecognizerDelegate>
-@property (nonatomic, assign) NSTimeInterval ccvLastCreateAt; // 创建防抖（cell 点击与兜底手势可能双触发）
+@property (nonatomic, assign) NSTimeInterval ccvLastRowActionAt;   // 行动作互斥防抖（cell 点击与兜底手势可能双触发）
+@property (nonatomic, strong) NSIndexPath *ccvSwipeOpenIndexPath;  // 左滑编辑态的行（此时点击=关闭滑动/点删除，不能当行点击）
 @end
 
 @implementation CCVideoSettingsListController
@@ -257,6 +259,23 @@ static UITableView *CCVFindTableView(UIView *root) {
         UITableView *tv = CCVFindTableView(self.view);
         if (!tv) { CCVLog(@"fallbackTap: 找不到 tableView，忽略"); return; }
         CGPoint pt = [g locationInView:tv];
+
+        // 左滑编辑态：这次点击要么是"点删除按钮"（删除 handler 自己会跑），要么是"点别处关闭滑动"，
+        // 都不能当成行点击（否则点删除会同时进素材库——v0.1.20 实测）。忽略并清除编辑标记防卡死。
+        if (self.ccvSwipeOpenIndexPath) {
+            CCVLog(@"fallbackTap: 滑动编辑态，忽略 (行 %@)", self.ccvSwipeOpenIndexPath);
+            self.ccvSwipeOpenIndexPath = nil;
+            return;
+        }
+
+        // 双保险：点在系统滑动删除按钮上（私有类名含 SwipeAction）也不当行点击
+        UIView *hit = [tv hitTest:pt withEvent:nil];
+        NSString *hitCls = NSStringFromClass([hit class]);
+        if ([hitCls containsString:@"SwipeAction"] || [hitCls containsString:@"ContextualAction"]) {
+            CCVLog(@"fallbackTap: 点在滑动按钮(%@)上，忽略", hitCls);
+            return;
+        }
+
         NSIndexPath *ip = [tv indexPathForRowAtPoint:pt];
         if (!ip) return;
         PSSpecifier *spec = [self ccvSpecifierAtIndexPath:ip];
@@ -358,23 +377,18 @@ static UITableView *CCVFindTableView(UIView *root) {
     return nil;
 }
 
-// 模块行/创建行 cell 由这里直接配置，不再依赖 PSListController 的复用/刷新机制——
-// 实测连续多次 reloadSpecifiers 后可能出现"点击没反应"（cell 走错创建路径或复用状态卡死），
-// 直接按 indexPath 拿最新 specifier 配置，杜绝串位和 tapZone 缺失。
+// 行 cell：走 super 让 PS 应用它的背景/复用机制（分组白底靠它，v0.1.20 整组没背景的根因
+// 就是我们完全绕过了 super），返回后再按最新映射修正 ccvSpec/样式，杜绝复用串位。
+// 点击失灵由根视图兜底手势负责（实测连创建 5 个全有反应）。
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell = [super tableView:tableView cellForRowAtIndexPath:indexPath];
     PSSpecifier *spec = [self ccvSpecifierAtIndexPath:indexPath];
-    if (spec && [spec propertyForKey:@"cellClass"] == [CCVRowCell class]) {
-        static NSString *rid = @"CCVRowIdent";
-        CCVRowCell *cell = [tableView dequeueReusableCellWithIdentifier:rid];
-        if (!cell || !cell.tapZone) { // tapZone 缺失说明该 cell 没走我们的 init，重建
-            cell = [[CCVRowCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:rid specifier:spec];
-            cell.ccvController = self;
-        }
-        cell.ccvSpec = spec;
-        [cell applySpecifierStyle];
-        return cell;
+    if (spec && [spec propertyForKey:@"cellClass"] == [CCVRowCell class] && [cell isKindOfClass:[CCVRowCell class]]) {
+        CCVRowCell *row = (CCVRowCell *)cell;
+        row.ccvSpec = spec;
+        [row applySpecifierStyle];
     }
-    return [super tableView:tableView cellForRowAtIndexPath:indexPath];
+    return cell;
 }
 
 // 模块行（黑字）点击 -> 直接进入该模块的素材库选素材
@@ -389,6 +403,13 @@ static UITableView *CCVFindTableView(UIView *root) {
 }
 
 - (void)openModule:(PSSpecifier *)spec {
+    // 行动作互斥：0.3s 内 cell 点击/兜底手势/编辑态残留可能重复触发，只认第一次
+    NSTimeInterval now = [NSDate date].timeIntervalSince1970;
+    if (now - self.ccvLastRowActionAt < 0.3) {
+        CCVLog(@"openModule: 0.3s 内已触发过行动作，忽略重复触发");
+        return;
+    }
+    self.ccvLastRowActionAt = now;
     NSUInteger idx = [[spec propertyForKey:@"moduleIndex"] integerValue];
     CCVLog(@"openModule: spec=%@ idx=%lu", spec.name ?: @"nil", (unsigned long)idx);
     // 去重：素材库已经推到顶就不再推（tap 触摸区/didSelect/buttonAction 可能多路触发）
@@ -408,6 +429,18 @@ static UITableView *CCVFindTableView(UIView *root) {
     BOOL editable = spec && [spec propertyForKey:@"moduleIndex"]; // 仅模块行可左滑，创建行不可
     if (!editable) CCVLog(@"canEdit: (%ld,%ld) -> NO（spec=%@）", (long)indexPath.section, (long)indexPath.row, spec.name ?: @"nil");
     return editable;
+}
+
+// 滑动编辑态跟踪：左滑露出删除按钮期间，任何点击都是"点删除"或"关闭滑动"，
+// 兜底手势据此跳过（否则点删除会同时被当成行点击推进素材库——v0.1.20 实测）
+- (void)tableView:(UITableView *)tableView willBeginEditingRowAtIndexPath:(NSIndexPath *)indexPath {
+    self.ccvSwipeOpenIndexPath = indexPath;
+    CCVLog(@"willBeginEditing: (%ld,%ld)", (long)indexPath.section, (long)indexPath.row);
+}
+
+- (void)tableView:(UITableView *)tableView didEndEditingRowAtIndexPath:(NSIndexPath *)indexPath {
+    CCVLog(@"didEndEditing: (%ld,%ld)", (long)indexPath.section, (long)indexPath.row);
+    self.ccvSwipeOpenIndexPath = nil;
 }
 
 - (void)tableView:(UITableView *)tableView commitEditingStyle:(UITableViewCellEditingStyle)editingStyle forRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -478,6 +511,7 @@ static UITableView *CCVFindTableView(UIView *root) {
     CCVPostDarwin(CCVDarwinSettingsChanged);
 
     CCVLog(@"deleteModule: reloadSpecifiers 前");
+    self.ccvSwipeOpenIndexPath = nil; // 删除后滑动编辑态已结束，防标记卡死导致兜底手势失效
     _specifiers = nil;
     [self reloadSpecifiers];
     CCVLog(@"deleteModule: reloadSpecifiers 后（应显示 %lu 个模块）", (unsigned long)n - 1);
@@ -486,12 +520,13 @@ static UITableView *CCVFindTableView(UIView *root) {
 // 创建模块：直接创建（无弹窗、不注销）。设置进程直接同步 bundle 文件（不走 SpringBoard 助手），
 // 失败原因写进诊断键，页脚可见。
 - (void)createModule:(PSSpecifier *)spec {
+    // 行动作互斥：0.3s 内 cell 点击/兜底手势可能重复触发，只认第一次
     NSTimeInterval now = [NSDate date].timeIntervalSince1970;
-    if (now - self.ccvLastCreateAt < 0.6) {
-        CCVLog(@"createModule: 防抖忽略（距上次 %.2fs）", now - self.ccvLastCreateAt);
+    if (now - self.ccvLastRowActionAt < 0.3) {
+        CCVLog(@"createModule: 0.3s 内已触发过行动作，忽略重复触发");
         return;
     }
-    self.ccvLastCreateAt = now;
+    self.ccvLastRowActionAt = now;
     NSUInteger n = CCVMaxModules();
     CCVLog(@"createModule: 当前 max=%lu", (unsigned long)n);
     if (n >= CCV_MAX_MODULES) {
@@ -501,6 +536,7 @@ static UITableView *CCVFindTableView(UIView *root) {
     CCVSetMaxModules(n + 1);
     [self syncBundlesAndRecordDiag];
     CCVPostDarwin(CCVDarwinSettingsChanged);
+    self.ccvSwipeOpenIndexPath = nil; // 防编辑态标记卡死
     _specifiers = nil;
     [self reloadSpecifiers];
     CCVLog(@"createModule: 完成 max=%lu", (unsigned long)n + 1);
