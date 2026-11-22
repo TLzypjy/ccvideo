@@ -48,6 +48,19 @@ static void CCVSBNotifyCallback(CFNotificationCenterRef center, void *observer,
                 NSLog(@"[CCVideoSBS] copy %@ failed: %@", bundleName, err);
             }
         }
+        // 删除模块：MaxModules 减少后，把控制中心目录里多出来的模块 bundle 移除
+        // （目录已由 deb 安装脚本放开为 0777，mobile 可删除其中 root 属主的条目）
+        for (int n = max + 1; n <= 8; n++) {
+            NSString *bundleName = [NSString stringWithFormat:@"CCVideo%d.bundle", n];
+            NSString *dst = [ccDir stringByAppendingPathComponent:bundleName];
+            if (![fm fileExistsAtPath:dst]) continue;
+            NSError *err = nil;
+            if ([fm removeItemAtPath:dst error:&err]) {
+                NSLog(@"[CCVideoSBS] removed %@ (同步需下次注销)", bundleName);
+            } else {
+                NSLog(@"[CCVideoSBS] remove %@ failed: %@", bundleName, err);
+            }
+        }
         // 不 exit(0)：按用户要求创建模块不触发注销
     });
 }
