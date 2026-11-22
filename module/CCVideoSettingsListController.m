@@ -75,6 +75,86 @@
 
 @end
 
+// ---------- 自定义模块行 cell：白卡黑字+箭头，点击用 tap 手势自己处理 ----------
+// PSLinkCell 无 detail 时 iOS16 渲染成灰色不可点行（didSelect 都不触发），
+// 所以模块行不再依赖系统行为：cellClass 自绘 + UITapGestureRecognizer 直达 openModule:
+@interface CCVModuleCell : PSTableCell
+@property (nonatomic, strong) UILabel *modTitle;
+@property (nonatomic, strong) UILabel *chevron;
+@end
+
+@implementation CCVModuleCell
+
+- (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)reuseIdentifier specifier:(PSSpecifier *)specifier {
+    if (self = [super initWithStyle:style reuseIdentifier:reuseIdentifier specifier:specifier]) {
+        self.backgroundColor = [UIColor clearColor];
+        self.selectionStyle = UITableViewCellSelectionStyleDefault;
+        self.userInteractionEnabled = YES;
+        self.contentView.userInteractionEnabled = YES;
+
+        UIView *card = [[UIView alloc] init];
+        card.backgroundColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *t) {
+            return t.userInterfaceStyle == UIUserInterfaceStyleDark
+                ? [UIColor colorWithWhite:0.11 alpha:1.0]
+                : [UIColor colorWithWhite:1.0 alpha:0.72];
+        }];
+        card.layer.cornerRadius = 22;
+        self.backgroundView = card;
+
+        _modTitle = [[UILabel alloc] init];
+        _modTitle.text = specifier.name;
+        _modTitle.font = [UIFont systemFontOfSize:17];
+        _modTitle.textColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *t) {
+            return t.userInterfaceStyle == UIUserInterfaceStyleDark
+                ? [UIColor whiteColor] : [UIColor colorWithWhite:0.1 alpha:1.0];
+        }];
+        [self.contentView addSubview:_modTitle];
+
+        _chevron = [[UILabel alloc] init];
+        _chevron.text = @"›";
+        _chevron.font = [UIFont boldSystemFontOfSize:20];
+        _chevron.textAlignment = NSTextAlignmentCenter;
+        _chevron.textColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *t) {
+            return t.userInterfaceStyle == UIUserInterfaceStyleDark
+                ? [UIColor colorWithWhite:0.5 alpha:1.0]
+                : [UIColor colorWithWhite:0.75 alpha:1.0];
+        }];
+        [self.contentView addSubview:_chevron];
+
+        UITapGestureRecognizer *tg = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(moduleTapped)];
+        tg.cancelsTouchesInView = NO;
+        [self addGestureRecognizer:tg];
+    }
+    return self;
+}
+
+- (void)moduleTapped {
+    PSSpecifier *spec = self.specifier;
+    id target = [spec target];
+    if ([target respondsToSelector:@selector(openModule:)]) {
+        [target performSelector:@selector(openModule:) withObject:spec];
+    }
+}
+
+- (void)refreshCellContentsWithSpecifier:(PSSpecifier *)specifier {
+    [super refreshCellContentsWithSpecifier:specifier];
+    self.modTitle.text = specifier.name;
+    // 隐藏基类自带的灰字行标题
+    self.textLabel.text = @"";
+    self.textLabel.hidden = YES;
+    if (self.detailTextLabel) self.detailTextLabel.hidden = YES;
+}
+
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    CGFloat w = self.contentView.bounds.size.width;
+    CGFloat h = self.contentView.bounds.size.height;
+    self.modTitle.frame = CGRectMake(20, (h - 22) / 2, w - 60, 22);
+    self.chevron.frame = CGRectMake(w - 34, (h - 24) / 2, 24, 24);
+}
+
+@end
+
 // ---------- 主页：模块列表 + 创建模块 ----------
 @implementation CCVideoSettingsListController
 
@@ -99,7 +179,8 @@
             PSSpecifier *mod = [PSSpecifier preferenceSpecifierNamed:[NSString stringWithFormat:@"视频模块%@", @(i)]
                     target:self set:nil get:nil detail:nil cell:PSLinkCell edit:nil];
             [mod setProperty:@(i) forKey:@"moduleIndex"];
-            mod.buttonAction = @selector(openModule:); // PS 标准触发机制（不依赖表代理链路）
+            [mod setProperty:[CCVModuleCell class] forKey:@"cellClass"]; // 自绘黑字卡片行
+            mod.buttonAction = @selector(openModule:);                    // 兜底触发
             [specs addObject:mod];
         }
 
@@ -152,6 +233,8 @@
 }
 
 - (void)openModule:(PSSpecifier *)spec {
+    // 去重：tap 手势/buttonAction/didSelect 三条路都可能触发，已在跳转中就不再推
+    if (self.navigationController && ![self.navigationController.topViewController isEqual:self]) return;
     NSUInteger idx = [[spec propertyForKey:@"moduleIndex"] integerValue];
     if (idx == 0) idx = 1;
     CCVideoLibraryViewController *vc = [[CCVideoLibraryViewController alloc] init];
@@ -225,11 +308,15 @@
     CCVPostDarwin(CCVDarwinSettingsChanged);
 }
 
-// 自定义显示模式卡片：行高自己接管（PSListController 下 +preferredHeightForSpecifier: 不可靠）
+// 自定义显示模式卡片/模块行：行高自己接管（PSListController 下 +preferredHeightForSpecifier: 不可靠）
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
     PSSpecifier *spec = [self specifierAtIndexPath:indexPath];
-    if (spec && [spec propertyForKey:@"cellClass"] == [CCVDisplayModeCell class]) {
+    Class cls = [spec propertyForKey:@"cellClass"];
+    if (cls == [CCVDisplayModeCell class]) {
         return [CCVDisplayModeCell preferredHeight];
+    }
+    if (cls == [CCVModuleCell class]) {
+        return 56;
     }
     return [super tableView:tableView heightForRowAtIndexPath:indexPath];
 }
