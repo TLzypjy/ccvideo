@@ -4,7 +4,7 @@
 
 // ---------- 自定义卡片 cell：显示模式（标题 + 三挡分段 + 卡底说明文字） ----------
 @interface CCVDisplayModeCell : PSTableCell
-@property (nonatomic, strong) UILabel *titleLabel;
+@property (nonatomic, strong) UILabel *modeTitle;
 @property (nonatomic, strong) UISegmentedControl *segment;
 @property (nonatomic, strong) UILabel *descLabel;
 + (CGFloat)preferredHeight;
@@ -45,14 +45,14 @@
         card.layer.cornerRadius = 22;
         self.backgroundView = card;
 
-        _titleLabel = [[UILabel alloc] init];
-        _titleLabel.text = @"显示模式";
-        _titleLabel.font = [UIFont boldSystemFontOfSize:17];
-        _titleLabel.textColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *t) {
+        _modeTitle = [[UILabel alloc] init];
+        _modeTitle.text = @"显示模式";
+        _modeTitle.font = [UIFont boldSystemFontOfSize:17];
+        _modeTitle.textColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *t) {
             return t.userInterfaceStyle == UIUserInterfaceStyleDark
                 ? [UIColor whiteColor] : [UIColor colorWithWhite:0.1 alpha:1.0];
         }];
-        [self.contentView addSubview:_titleLabel];
+        [self.contentView addSubview:_modeTitle];
 
         _segment = [[UISegmentedControl alloc] initWithItems:@[@"裁切填满", @"完整适应", @"拉伸填满"]];
         _segment.selectedSegmentIndex = CCVDisplayMode();
@@ -84,7 +84,7 @@
     [super layoutSubviews];
     CGFloat w = self.contentView.bounds.size.width;
     CGFloat pad = 20;
-    self.titleLabel.frame = CGRectMake(pad, 16, w - pad * 2, 22);
+    self.modeTitle.frame = CGRectMake(pad, 16, w - pad * 2, 22);
     self.segment.frame = CGRectMake(pad, 16 + 22 + 12, w - pad * 2, 32);
     CGFloat ty = 16 + 22 + 12 + 32 + 12;
     self.descLabel.frame = CGRectMake(pad, ty, w - pad * 2, [CCVDisplayModeCell descHeightForWidth:w - pad * 2]);
