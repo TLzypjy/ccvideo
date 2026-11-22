@@ -2,31 +2,16 @@
 #import "CCVideoPrefs.h"
 #import "CCVideoLibraryViewController.h"
 
-// ---------- 自定义卡片 cell：显示模式（标题 + 三挡分段 + 卡底说明文字） ----------
+// ---------- 自定义卡片 cell：显示模式（卡片内只有分段按钮，标题/说明由组头/组脚显示在卡片外） ----------
 @interface CCVDisplayModeCell : PSTableCell
-@property (nonatomic, strong) UILabel *modeTitle;
 @property (nonatomic, strong) UISegmentedControl *segment;
-@property (nonatomic, strong) UILabel *descLabel;
 + (CGFloat)preferredHeight;
 @end
 
 @implementation CCVDisplayModeCell
 
-+ (NSString *)descText {
-    return @"选择图片和视频的显示方式：\n· 裁切填满：保持比例、放大并裁剪超出部分\n· 完整适应：完整显示原图，空白区域用模糊背景补齐\n· 拉伸填满：忽略比例，直接铺满模块";
-}
-
-+ (CGFloat)descHeightForWidth:(CGFloat)w {
-    CGRect b = [[self descText] boundingRectWithSize:CGSizeMake(w, CGFLOAT_MAX)
-                                             options:NSStringDrawingUsesLineFragmentOrigin
-                                          attributes:@{NSFontAttributeName:[UIFont systemFontOfSize:12]}
-                                             context:nil];
-    return ceil(b.size.height);
-}
-
 + (CGFloat)preferredHeight {
-    // 上边距16 + 标题22 + 间距12 + 分段32 + 间距12 + 说明 + 下边距16
-    return 16 + 22 + 12 + 32 + 12 + [self descHeightForWidth:335] + 16;
+    return 56; // 与滑杆行相近的卡片高度
 }
 
 - (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)reuseIdentifier specifier:(PSSpecifier *)specifier {
@@ -45,32 +30,12 @@
         card.layer.cornerRadius = 22;
         self.backgroundView = card;
 
-        _modeTitle = [[UILabel alloc] init];
-        _modeTitle.text = @"显示模式";
-        _modeTitle.font = [UIFont boldSystemFontOfSize:17];
-        _modeTitle.textColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *t) {
-            return t.userInterfaceStyle == UIUserInterfaceStyleDark
-                ? [UIColor whiteColor] : [UIColor colorWithWhite:0.1 alpha:1.0];
-        }];
-        [self.contentView addSubview:_modeTitle];
-
         _segment = [[UISegmentedControl alloc] initWithItems:@[@"裁切填满", @"完整适应", @"拉伸填满"]];
         _segment.selectedSegmentIndex = CCVDisplayMode();
         if (specifier.target) {
             [_segment addTarget:specifier.target action:@selector(displayModeChanged:) forControlEvents:UIControlEventValueChanged];
         }
         [self.contentView addSubview:_segment];
-
-        _descLabel = [[UILabel alloc] init];
-        _descLabel.text = [CCVDisplayModeCell descText];
-        _descLabel.font = [UIFont systemFontOfSize:12];
-        _descLabel.numberOfLines = 0;
-        _descLabel.textColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *t) {
-            return t.userInterfaceStyle == UIUserInterfaceStyleDark
-                ? [UIColor colorWithWhite:0.65 alpha:1.0]
-                : [UIColor colorWithWhite:0.45 alpha:1.0];
-        }];
-        [self.contentView addSubview:_descLabel];
     }
     return self;
 }
@@ -83,11 +48,8 @@
 - (void)layoutSubviews {
     [super layoutSubviews];
     CGFloat w = self.contentView.bounds.size.width;
-    CGFloat pad = 20;
-    self.modeTitle.frame = CGRectMake(pad, 16, w - pad * 2, 22);
-    self.segment.frame = CGRectMake(pad, 16 + 22 + 12, w - pad * 2, 32);
-    CGFloat ty = 16 + 22 + 12 + 32 + 12;
-    self.descLabel.frame = CGRectMake(pad, ty, w - pad * 2, [CCVDisplayModeCell descHeightForWidth:w - pad * 2]);
+    CGFloat h = self.contentView.bounds.size.height;
+    self.segment.frame = CGRectMake(20, (h - 32) / 2, w - 40, 32);
 }
 
 @end
@@ -126,9 +88,10 @@
             [specs addObject:create];
         }
 
-        // 显示模式（全局，一张卡片：标题 + 三挡分段 + 卡底说明）
-        PSSpecifier *gMode = [PSSpecifier preferenceSpecifierNamed:@""
+        // 显示模式（全局）：标题作组头、说明作组脚，卡片内只有分段按钮
+        PSSpecifier *gMode = [PSSpecifier preferenceSpecifierNamed:@"显示模式"
                 target:self set:nil get:nil detail:nil cell:PSGroupCell edit:nil];
+        [gMode setProperty:@"选择图片和视频的显示方式：\n· 裁切填满：保持比例、放大并裁剪超出部分\n· 完整适应：完整显示原图，空白区域用模糊背景补齐\n· 拉伸填满：忽略比例，直接铺满模块" forKey:@"footerTitle"];
         [specs addObject:gMode];
         PSSpecifier *dm = [PSSpecifier preferenceSpecifierNamed:@"显示模式"
                 target:self set:nil get:nil detail:nil cell:PSLinkCell edit:nil];
