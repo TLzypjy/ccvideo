@@ -75,27 +75,30 @@
 
 @end
 
-// ---------- 自定义模块行 cell：白卡黑字+箭头，左滑露出删除按钮 ----------
-// PSLinkCell 无 detail 时 iOS16 渲染成灰色不可点行（didSelect 都不触发），
-// 且基类会自己画一遍 specifier 标题（与我们的大字叠加）。所以：
-// 1) init/refresh 都隐藏基类文字；2) 全尺寸透明触摸区 + hitTest 强制转发；
-// 3) 卡片装进 cardWrap 容器，左滑平移露出右侧红色"删除"，点击删除该模块。
-@interface CCVModuleCell : PSTableCell <UIGestureRecognizerDelegate>
-@property (nonatomic, strong) UIView *cardWrap;      // 卡片容器（整体平移）
-@property (nonatomic, strong) UILabel *modTitle;
+// ---------- 统一行 cell：模块行（黑字+箭头+左滑删除）与创建模块（蓝字）共用一个类 ----------
+// 为什么统一：PSListController 复用 cell 时（1) 基类的 specifier 属性不保证刷新，
+// (2) 不同 cellClass 可能共用复用池导致类串位（模块行拿到创建 cell → 点了变创建）。
+// 统一类 + 自己保存 specifier（ccvSpec）+ 行为由 specifier 属性决定，彻底杜绝串位。
+// 另外：卡片必须不透明、删除按钮默认隐藏——否则按钮会透过半透明卡片"常显"。
+@interface CCVRowCell : PSTableCell <UIGestureRecognizerDelegate>
+@property (nonatomic, strong) PSSpecifier *ccvSpec;  // 自己保存（不依赖基类只读 specifier）
+@property (nonatomic, assign) BOOL isCreate;
+@property (nonatomic, strong) UIView *cardWrap;
+@property (nonatomic, strong) UILabel *rowTitle;
 @property (nonatomic, strong) UILabel *chevron;
 @property (nonatomic, strong) UIControl *tapZone;
 @property (nonatomic, strong) UIButton *deleteBtn;
-@property (nonatomic, assign) CGFloat dragBase;      // 手势开始时的偏移
-@property (nonatomic, assign) BOOL swipeOpen;        // 是否处于左滑展开态
+@property (nonatomic, assign) CGFloat dragBase;
+@property (nonatomic, assign) BOOL swipeOpen;
 @end
 
-@implementation CCVModuleCell
+@implementation CCVRowCell
 
-static const CGFloat CCVSwipeWidth = 76.0; // 删除按钮宽度
+static const CGFloat CCVSwipeWidth = 76.0;
 
 - (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)reuseIdentifier specifier:(PSSpecifier *)specifier {
     if (self = [super initWithStyle:style reuseIdentifier:reuseIdentifier specifier:specifier]) {
+        self.ccvSpec = specifier;
         self.backgroundColor = [UIColor clearColor];
         self.selectionStyle = UITableViewCellSelectionStyleNone;
         self.userInteractionEnabled = YES;
@@ -106,13 +109,14 @@ static const CGFloat CCVSwipeWidth = 76.0; // 删除按钮宽度
         self.textLabel.hidden = YES;
         if (self.detailTextLabel) self.detailTextLabel.hidden = YES;
 
-        // 红色删除按钮（垫在卡片下面，左滑露出）
+        // 红色删除按钮（垫在卡片下面，左滑露出；默认隐藏防透出）
         _deleteBtn = [UIButton buttonWithType:UIButtonTypeCustom];
         _deleteBtn.backgroundColor = [UIColor systemRedColor];
         _deleteBtn.layer.cornerRadius = 22;
         [_deleteBtn setTitle:@"删除" forState:UIControlStateNormal];
         [_deleteBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
         _deleteBtn.titleLabel.font = [UIFont systemFontOfSize:12];
+        _deleteBtn.hidden = YES;
         [_deleteBtn addTarget:self action:@selector(deleteTapped) forControlEvents:UIControlEventTouchUpInside];
         [self.contentView addSubview:_deleteBtn];
 
@@ -126,21 +130,20 @@ static const CGFloat CCVSwipeWidth = 76.0; // 删除按钮宽度
         card.backgroundColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *t) {
             return t.userInterfaceStyle == UIUserInterfaceStyleDark
                 ? [UIColor colorWithWhite:0.11 alpha:1.0]
-                : [UIColor colorWithWhite:1.0 alpha:0.72];
+                : [UIColor whiteColor]; // 不透明：底下的删除按钮不能透出来
         }];
         card.layer.cornerRadius = 22;
         card.userInteractionEnabled = NO;
         [_cardWrap addSubview:card];
 
-        _modTitle = [[UILabel alloc] init];
-        _modTitle.text = specifier.name;
-        _modTitle.font = [UIFont systemFontOfSize:12];
-        _modTitle.textColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *t) {
+        _rowTitle = [[UILabel alloc] init];
+        _rowTitle.font = [UIFont systemFontOfSize:12];
+        _rowTitle.textColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *t) {
             return t.userInterfaceStyle == UIUserInterfaceStyleDark
                 ? [UIColor whiteColor] : [UIColor colorWithWhite:0.1 alpha:1.0];
         }];
-        _modTitle.userInteractionEnabled = NO;
-        [_cardWrap addSubview:_modTitle];
+        _rowTitle.userInteractionEnabled = NO;
+        [_cardWrap addSubview:_rowTitle];
 
         _chevron = [[UILabel alloc] init];
         _chevron.text = @"›";
@@ -157,14 +160,43 @@ static const CGFloat CCVSwipeWidth = 76.0; // 删除按钮宽度
         // 全尺寸透明触摸区（hitTest 强制转发到这里；左滑手势也挂在它上面）
         _tapZone = [[UIControl alloc] init];
         _tapZone.backgroundColor = [UIColor clearColor];
-        [_tapZone addTarget:self action:@selector(moduleTapped) forControlEvents:UIControlEventTouchUpInside];
+        [_tapZone addTarget:self action:@selector(rowTapped) forControlEvents:UIControlEventTouchUpInside];
         [self.contentView addSubview:_tapZone];
 
         UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
         pan.delegate = self;
         [_tapZone addGestureRecognizer:pan];
+
+        [self applySpecifierStyle];
     }
     return self;
+}
+
+// 按 specifier 属性套样式（创建行蓝字无箭头无滑动；模块行黑字带箭头可滑动）
+- (void)applySpecifierStyle {
+    PSSpecifier *spec = self.ccvSpec;
+    self.isCreate = [[spec propertyForKey:@"isCreate"] boolValue];
+    self.rowTitle.text = spec.name;
+    if (self.isCreate) {
+        self.rowTitle.textColor = [UIColor colorWithRed:0.0 green:0.48 blue:1.0 alpha:1.0];
+        self.chevron.hidden = YES;
+        self.deleteBtn.hidden = YES;
+    } else {
+        self.rowTitle.textColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *t) {
+            return t.userInterfaceStyle == UIUserInterfaceStyleDark
+                ? [UIColor whiteColor] : [UIColor colorWithWhite:0.1 alpha:1.0];
+        }];
+        self.chevron.hidden = NO;
+        self.deleteBtn.hidden = !self.swipeOpen; // 未滑动时绝不显示
+    }
+}
+
+- (void)closeSwipeAnimated:(BOOL)animated {
+    self.swipeOpen = NO;
+    void (^block)(void) = ^{ self.cardWrap.transform = CGAffineTransformIdentity; };
+    if (animated) [UIView animateWithDuration:0.2 animations:block];
+    else block();
+    if (!self.isCreate) self.deleteBtn.hidden = YES;
 }
 
 // 与表格竖向滚动并行识别：横向滑动归我们，竖向滚动归表格
@@ -173,6 +205,7 @@ static const CGFloat CCVSwipeWidth = 76.0; // 删除按钮宽度
 }
 
 - (void)handlePan:(UIPanGestureRecognizer *)p {
+    if (self.isCreate) return; // 创建行不可滑动删除
     CGPoint t = [p translationInView:self];
     if (p.state == UIGestureRecognizerStateBegan) {
         self.dragBase = self.swipeOpen ? -CCVSwipeWidth : 0;
@@ -181,36 +214,41 @@ static const CGFloat CCVSwipeWidth = 76.0; // 删除按钮宽度
         CGFloat x = self.dragBase + t.x;
         if (x > 0) x = 0;
         if (x < -CCVSwipeWidth) x = -CCVSwipeWidth;
+        self.deleteBtn.hidden = NO; // 一开始滑就露出按钮（在卡片底下，未滑出部分被不透明卡片盖住）
         self.cardWrap.transform = CGAffineTransformMakeTranslation(x, 0);
     } else if (p.state == UIGestureRecognizerStateEnded || p.state == UIGestureRecognizerStateCancelled) {
         if (fabs(t.x) <= fabs(t.y)) return;
         CGPoint v = [p velocityInView:self];
         CGFloat x = self.dragBase + t.x;
         BOOL open = (x < -CCVSwipeWidth / 2.0) || (v.x < -400 && x < 0);
+        self.swipeOpen = open;
         [UIView animateWithDuration:0.2 animations:^{
             self.cardWrap.transform = CGAffineTransformMakeTranslation(open ? -CCVSwipeWidth : 0, 0);
         }];
-        self.swipeOpen = open;
+        if (!open) self.deleteBtn.hidden = YES;
     }
 }
 
-- (void)moduleTapped {
-    if (self.swipeOpen) { // 展开态先收起
-        [UIView animateWithDuration:0.2 animations:^{
-            self.cardWrap.transform = CGAffineTransformIdentity;
-        }];
-        self.swipeOpen = NO;
+- (void)rowTapped {
+    if (!self.isCreate && self.swipeOpen) { // 展开态先收起
+        [self closeSwipeAnimated:YES];
         return;
     }
-    PSSpecifier *spec = self.specifier;
+    PSSpecifier *spec = self.ccvSpec;
     id target = [spec target];
-    if ([target respondsToSelector:@selector(openModule:)]) {
-        [target performSelector:@selector(openModule:) withObject:spec];
+    if (self.isCreate) {
+        if ([target respondsToSelector:@selector(createModule:)]) {
+            [target performSelector:@selector(createModule:) withObject:spec];
+        }
+    } else if ([spec propertyForKey:@"moduleIndex"]) {
+        if ([target respondsToSelector:@selector(openModule:)]) {
+            [target performSelector:@selector(openModule:) withObject:spec];
+        }
     }
 }
 
 - (void)deleteTapped {
-    PSSpecifier *spec = self.specifier;
+    PSSpecifier *spec = self.ccvSpec;
     id target = [spec target];
     if ([target respondsToSelector:@selector(deleteModule:)]) {
         [target performSelector:@selector(deleteModule:) withObject:spec];
@@ -219,7 +257,7 @@ static const CGFloat CCVSwipeWidth = 76.0; // 删除按钮宽度
 
 // 展开态：删除按钮区域的触摸给按钮；其余给触摸区
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-    if (self.swipeOpen && self.deleteBtn &&
+    if (!self.isCreate && self.swipeOpen && self.deleteBtn &&
         [self.deleteBtn pointInside:[self convertPoint:point toView:self.deleteBtn] withEvent:event]) {
         return self.deleteBtn;
     }
@@ -231,13 +269,12 @@ static const CGFloat CCVSwipeWidth = 76.0; // 删除按钮宽度
 
 - (void)refreshCellContentsWithSpecifier:(PSSpecifier *)specifier {
     [super refreshCellContentsWithSpecifier:specifier];
-    self.modTitle.text = specifier.name;
+    self.ccvSpec = specifier; // 关键：复用时自己刷新 specifier，不信基类
+    [self closeSwipeAnimated:NO];
+    [self applySpecifierStyle];
     self.textLabel.text = @"";
     self.textLabel.hidden = YES;
     if (self.detailTextLabel) self.detailTextLabel.hidden = YES;
-    // 复用/刷新时收起滑动状态
-    self.swipeOpen = NO;
-    self.cardWrap.transform = CGAffineTransformIdentity;
 }
 
 - (void)layoutSubviews {
@@ -248,85 +285,8 @@ static const CGFloat CCVSwipeWidth = 76.0; // 删除按钮宽度
     self.cardWrap.frame = CGRectMake(0, 0, w, h);
     UIView *card = self.cardWrap.subviews.firstObject;
     card.frame = CGRectMake(0, 0, w, h);
-    self.modTitle.frame = CGRectMake(20, (h - 16) / 2, w - 60, 16);
+    self.rowTitle.frame = CGRectMake(20, (h - 16) / 2, w - 60, 16);
     self.chevron.frame = CGRectMake(w - 34, (h - 18) / 2, 24, 18);
-    self.tapZone.frame = self.contentView.bounds;
-}
-
-@end
-
-// ---------- 自定义"创建模块" cell：蓝字 12pt（系统 PSButtonCell 字号无法控制） ----------
-@interface CCVCreateCell : PSTableCell
-@property (nonatomic, strong) UILabel *createTitle;
-@property (nonatomic, strong) UIControl *tapZone;
-@end
-
-@implementation CCVCreateCell
-
-- (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)reuseIdentifier specifier:(PSSpecifier *)specifier {
-    if (self = [super initWithStyle:style reuseIdentifier:reuseIdentifier specifier:specifier]) {
-        self.backgroundColor = [UIColor clearColor];
-        self.selectionStyle = UITableViewCellSelectionStyleNone;
-        self.userInteractionEnabled = YES;
-        self.contentView.userInteractionEnabled = YES;
-
-        self.textLabel.text = @"";
-        self.textLabel.hidden = YES;
-        if (self.detailTextLabel) self.detailTextLabel.hidden = YES;
-
-        UIView *card = [[UIView alloc] init];
-        card.backgroundColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *t) {
-            return t.userInterfaceStyle == UIUserInterfaceStyleDark
-                ? [UIColor colorWithWhite:0.11 alpha:1.0]
-                : [UIColor colorWithWhite:1.0 alpha:0.72];
-        }];
-        card.layer.cornerRadius = 22;
-        card.userInteractionEnabled = NO;
-        self.backgroundView = card;
-
-        _createTitle = [[UILabel alloc] init];
-        _createTitle.text = specifier.name; // 创建模块
-        _createTitle.font = [UIFont systemFontOfSize:12];
-        _createTitle.textColor = [UIColor colorWithRed:0.0 green:0.48 blue:1.0 alpha:1.0];
-        _createTitle.userInteractionEnabled = NO;
-        [self.contentView addSubview:_createTitle];
-
-        _tapZone = [[UIControl alloc] init];
-        _tapZone.backgroundColor = [UIColor clearColor];
-        [_tapZone addTarget:self action:@selector(createTapped) forControlEvents:UIControlEventTouchUpInside];
-        [self.contentView addSubview:_tapZone];
-    }
-    return self;
-}
-
-- (void)createTapped {
-    PSSpecifier *spec = self.specifier;
-    id target = [spec target];
-    if ([target respondsToSelector:@selector(createModule:)]) {
-        [target performSelector:@selector(createModule:) withObject:spec];
-    }
-}
-
-- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-    if (self.tapZone && [self.tapZone pointInside:[self convertPoint:point toView:self.tapZone] withEvent:event]) {
-        return self.tapZone;
-    }
-    return [super hitTest:point withEvent:event];
-}
-
-- (void)refreshCellContentsWithSpecifier:(PSSpecifier *)specifier {
-    [super refreshCellContentsWithSpecifier:specifier];
-    self.createTitle.text = specifier.name;
-    self.textLabel.text = @"";
-    self.textLabel.hidden = YES;
-    if (self.detailTextLabel) self.detailTextLabel.hidden = YES;
-}
-
-- (void)layoutSubviews {
-    [super layoutSubviews];
-    CGFloat w = self.contentView.bounds.size.width;
-    CGFloat h = self.contentView.bounds.size.height;
-    self.createTitle.frame = CGRectMake(20, (h - 16) / 2, w - 40, 16);
     self.tapZone.frame = self.contentView.bounds;
 }
 
@@ -365,16 +325,17 @@ static const CGFloat CCVSwipeWidth = 76.0; // 删除按钮宽度
             PSSpecifier *mod = [PSSpecifier preferenceSpecifierNamed:[NSString stringWithFormat:@"视频模块%@", @(i)]
                     target:self set:nil get:nil detail:nil cell:PSLinkCell edit:nil];
             [mod setProperty:@(i) forKey:@"moduleIndex"];
-            [mod setProperty:[CCVModuleCell class] forKey:@"cellClass"]; // 自绘黑字卡片行
-            mod.buttonAction = @selector(openModule:);                    // 兜底触发
+            [mod setProperty:[CCVRowCell class] forKey:@"cellClass"]; // 统一行 cell（黑字+箭头+左滑删除）
+            mod.buttonAction = @selector(openModule:);                // 兜底触发
             [specs addObject:mod];
         }
 
         if (n < CCV_MAX_MODULES) {
             PSSpecifier *create = [PSSpecifier preferenceSpecifierNamed:@"创建模块"
                     target:self set:nil get:nil detail:nil cell:PSButtonCell edit:nil];
-            [create setProperty:[CCVCreateCell class] forKey:@"cellClass"]; // 蓝字 12pt 自绘
-            create.buttonAction = @selector(createModule:);                 // 兜底触发
+            [create setProperty:@YES forKey:@"isCreate"];                  // 统一 cell 据此显示蓝字/禁滑动
+            [create setProperty:[CCVRowCell class] forKey:@"cellClass"];   // 与模块行同一个类（复用不串位）
+            create.buttonAction = @selector(createModule:);                // 兜底触发
             [specs addObject:create];
         }
 
@@ -402,15 +363,28 @@ static const CGFloat CCVSwipeWidth = 76.0; // 删除按钮宽度
     return _specifiers;
 }
 
-// 模块行（黑字）点击 -> 直接进入该模块的素材库选素材
-// specifierAtIndexPath 在 iOS16 上可能返回 nil，兜底按行号取（组头也占一行，row 与 specifiers 下标一一对应）
-- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
-    PSSpecifier *spec = [self specifierAtIndexPath:indexPath];
-    if (!spec) {
-        NSArray *specs = [self specifiers];
-        NSUInteger row = indexPath.row;
-        if (specs && row < specs.count) spec = specs[row];
+// iOS16 上 specifierAtIndexPath 可能返回 nil 的兜底：按"组=节、其余 specifier=行"重放映射。
+// 之前直接 specs[row] 是错的（组头占 specs 下标但不占表格行）——那会把模块 3~N 映射到错误的
+// specifier 上（包括创建行的 specifier → 点模块变成创建模块）。
+- (PSSpecifier *)ccvSpecifierAtIndexPath:(NSIndexPath *)indexPath {
+    NSArray *specs = [self specifiers];
+    if (!specs || indexPath.section < 0 || indexPath.row < 0) return nil;
+    NSInteger section = -1, row = 0;
+    for (PSSpecifier *s in specs) {
+        if (s.cellType == PSGroupCell) {
+            section++;
+            row = 0;
+            continue;
+        }
+        if (section == indexPath.section && row == indexPath.row) return s;
+        row++;
     }
+    return nil;
+}
+
+// 模块行（黑字）点击 -> 直接进入该模块的素材库选素材
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    PSSpecifier *spec = [self ccvSpecifierAtIndexPath:indexPath];
     if (spec && [spec propertyForKey:@"moduleIndex"]) {
         [self openModule:spec];
         [tableView deselectRowAtIndexPath:indexPath animated:YES];
@@ -539,23 +513,15 @@ static const CGFloat CCVSwipeWidth = 76.0; // 删除按钮宽度
     CCVPostDarwin(CCVDarwinSettingsChanged);
 }
 
-// 自定义显示模式卡片/模块行：行高自己接管（PSListController 下 +preferredHeightForSpecifier: 不可靠）
+// 自定义显示模式卡片/统一行：行高自己接管（PSListController 下 +preferredHeightForSpecifier: 不可靠）
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
-    PSSpecifier *spec = [self specifierAtIndexPath:indexPath];
-    if (!spec) {
-        NSArray *specs = [self specifiers];
-        NSUInteger row = indexPath.row;
-        if (specs && row < specs.count) spec = specs[row];
-    }
+    PSSpecifier *spec = [self ccvSpecifierAtIndexPath:indexPath];
     Class cls = [spec propertyForKey:@"cellClass"];
     if (cls == [CCVDisplayModeCell class]) {
         return [CCVDisplayModeCell preferredHeight];
     }
-    if (cls == [CCVModuleCell class]) {
-        return 44;
-    }
-    if (cls == [CCVCreateCell class]) {
-        return 44;
+    if (cls == [CCVRowCell class]) {
+        return 44; // 模块行与创建模块行统一高度
     }
     return [super tableView:tableView heightForRowAtIndexPath:indexPath];
 }
