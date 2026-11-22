@@ -40,6 +40,11 @@
             [_segment addTarget:specifier.target action:@selector(displayModeChanged:) forControlEvents:UIControlEventValueChanged];
         }
         [self.contentView addSubview:_segment];
+
+        // 隐藏基类按 specifier name 画的行标题（否则"显示模式"会叠在分段按钮上）
+        self.textLabel.text = @"";
+        self.textLabel.hidden = YES;
+        if (self.detailTextLabel) self.detailTextLabel.hidden = YES;
     }
     return self;
 }
@@ -56,6 +61,9 @@
 - (void)refreshCellContentsWithSpecifier:(PSSpecifier *)specifier {
     [super refreshCellContentsWithSpecifier:specifier];
     if (_segment) _segment.selectedSegmentIndex = CCVDisplayMode();
+    self.textLabel.text = @"";
+    self.textLabel.hidden = YES;
+    if (self.detailTextLabel) self.detailTextLabel.hidden = YES;
 }
 
 - (void)layoutSubviews {
