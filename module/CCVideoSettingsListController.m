@@ -104,9 +104,8 @@
         self.textLabel.hidden = YES;
         if (self.detailTextLabel) self.detailTextLabel.hidden = YES;
 
-        // 透明行背景（与滑杆行一致，跟随主题页面背景；不再用白色圆角卡片）
-        self.backgroundView = nil;
-        self.backgroundColor = [UIColor clearColor];
+        // 背景不接管：用系统默认分组样式——同一分组的多行自动连成一张背景卡
+        // （首尾行自动圆角），与"显示模式/模块尺寸"等其他分类一致（用户要求）
 
         [self ccvSetupSubviews];
         [self applySpecifierStyle];
@@ -223,6 +222,7 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = @"视频模块";
+    CCVLog(@"viewDidLoad: self.view=%@ (class=%@)", self.view, NSStringFromClass([self.view class]));
 
     // 兜底点击手势：实测连续多次 reloadSpecifiers 后，cell 内的点击区可能收不到触摸
     // （表现为"连续创建 3 个后第 4 次点创建没反应"，滚动一下才恢复）。手势挂在根视图上，
@@ -235,27 +235,44 @@
     [self.view addGestureRecognizer:tap];
 }
 
+// 递归找真正的 UITableView（iOS16 的 PSListController.view 未必是 UITableView，
+// 直接强转再调 indexPathForRowAtPoint: 会 doesNotRecognizeSelector 闪退——v0.1.19 实测）
+static UITableView *CCVFindTableView(UIView *root) {
+    if (!root) return nil;
+    if ([root isKindOfClass:[UITableView class]]) return (UITableView *)root;
+    for (UIView *sub in root.subviews) {
+        UITableView *t = CCVFindTableView(sub);
+        if (t) return t;
+    }
+    return nil;
+}
+
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)other {
-    return YES;
+    return YES; // 允许与 PS 内部手势同时识别，保证兜底始终能触发
 }
 
 - (void)fallbackTap:(UITapGestureRecognizer *)g {
-    if (g.state != UIGestureRecognizerStateEnded) return;
-    UITableView *tv = (UITableView *)self.view;
-    CGPoint pt = [g locationInView:tv];
-    NSIndexPath *ip = [tv indexPathForRowAtPoint:pt];
-    if (!ip) return;
-    PSSpecifier *spec = [self ccvSpecifierAtIndexPath:ip];
-    if (!spec) {
-        CCVLog(@"fallbackTap: (%ld,%ld) 未映射到 specifier", (long)ip.section, (long)ip.row);
-        return;
-    }
-    if ([[spec propertyForKey:@"isCreate"] boolValue]) {
-        CCVLog(@"fallbackTap: 命中创建模块 (%ld,%ld)", (long)ip.section, (long)ip.row);
-        [self createModule:spec];
-    } else if ([spec propertyForKey:@"moduleIndex"]) {
-        CCVLog(@"fallbackTap: 命中 %@ (%ld,%ld)", spec.name ?: @"nil", (long)ip.section, (long)ip.row);
-        [self openModule:spec];
+    @try {
+        if (g.state != UIGestureRecognizerStateEnded) return;
+        UITableView *tv = CCVFindTableView(self.view);
+        if (!tv) { CCVLog(@"fallbackTap: 找不到 tableView，忽略"); return; }
+        CGPoint pt = [g locationInView:tv];
+        NSIndexPath *ip = [tv indexPathForRowAtPoint:pt];
+        if (!ip) return;
+        PSSpecifier *spec = [self ccvSpecifierAtIndexPath:ip];
+        if (!spec) {
+            CCVLog(@"fallbackTap: (%ld,%ld) 未映射到 specifier", (long)ip.section, (long)ip.row);
+            return;
+        }
+        if ([[spec propertyForKey:@"isCreate"] boolValue]) {
+            CCVLog(@"fallbackTap: 命中创建模块 (%ld,%ld)", (long)ip.section, (long)ip.row);
+            [self createModule:spec];
+        } else if ([spec propertyForKey:@"moduleIndex"]) {
+            CCVLog(@"fallbackTap: 命中 %@ (%ld,%ld)", spec.name ?: @"nil", (long)ip.section, (long)ip.row);
+            [self openModule:spec];
+        }
+    } @catch (NSException *e) {
+        CCVLog(@"fallbackTap 异常（忽略）: %@", e);
     }
 }
 
