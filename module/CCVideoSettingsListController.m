@@ -19,6 +19,9 @@
         self.backgroundColor = [UIColor clearColor];
         self.backgroundView = nil;
         self.selectionStyle = UITableViewCellSelectionStyleNone;
+        // 确保触摸链畅通（基类可能对某些 cell 类型关闭 contentView 交互）
+        self.userInteractionEnabled = YES;
+        self.contentView.userInteractionEnabled = YES;
 
         // 卡片背景（跟随深浅色）
         UIView *card = [[UIView alloc] init];
@@ -32,12 +35,22 @@
 
         _segment = [[UISegmentedControl alloc] initWithItems:@[@"裁切填满", @"完整适应", @"拉伸填满"]];
         _segment.selectedSegmentIndex = CCVDisplayMode();
+        _segment.enabled = YES;
         if (specifier.target) {
             [_segment addTarget:specifier.target action:@selector(displayModeChanged:) forControlEvents:UIControlEventValueChanged];
         }
         [self.contentView addSubview:_segment];
     }
     return self;
+}
+
+// 强制把分段区域的触摸交给 UISegmentedControl（防止基类/表格截走导致点不了）
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+    CGPoint local = [self convertPoint:point toView:self.segment];
+    if (self.segment && ![self.segment isHidden] && [self.segment pointInside:local withEvent:event]) {
+        return self.segment;
+    }
+    return [super hitTest:point withEvent:event];
 }
 
 - (void)refreshCellContentsWithSpecifier:(PSSpecifier *)specifier {
@@ -71,7 +84,7 @@
         PSSpecifier *g0 = [PSSpecifier preferenceSpecifierNamed:@""
                 target:self set:nil get:nil detail:nil cell:PSGroupCell edit:nil];
         [g0 setProperty:[NSString stringWithFormat:@"点击模块名可选择该模块播放的视频素材。已创建 %lu / 8 个，新创建的模块将在下次注销后出现在控制中心。",
-                         (unsigned long)n] forKey:@"footerTitle"];
+                         (unsigned long)n] forKey:@"footerText"];
         [specs addObject:g0];
 
         for (NSUInteger i = 1; i <= n; i++) {
@@ -91,7 +104,7 @@
         // 显示模式（全局）：标题作组头、说明作组脚，卡片内只有分段按钮
         PSSpecifier *gMode = [PSSpecifier preferenceSpecifierNamed:@"显示模式"
                 target:self set:nil get:nil detail:nil cell:PSGroupCell edit:nil];
-        [gMode setProperty:@"选择图片和视频的显示方式：\n· 裁切填满：保持比例、放大并裁剪超出部分\n· 完整适应：完整显示原图，空白区域用模糊背景补齐\n· 拉伸填满：忽略比例，直接铺满模块" forKey:@"footerTitle"];
+        [gMode setProperty:@"选择图片和视频的显示方式：\n· 裁切填满：保持比例、放大并裁剪超出部分\n· 完整适应：完整显示原图，空白区域用模糊背景补齐\n· 拉伸填满：忽略比例，直接铺满模块" forKey:@"footerText"];
         [specs addObject:gMode];
         PSSpecifier *dm = [PSSpecifier preferenceSpecifierNamed:@"显示模式"
                 target:self set:nil get:nil detail:nil cell:PSLinkCell edit:nil];
@@ -102,7 +115,7 @@
         for (NSUInteger i = 1; i <= n; i++) {
             PSSpecifier *g2 = [PSSpecifier preferenceSpecifierNamed:(i == 1 ? @"模块尺寸" : [NSString stringWithFormat:@"视频模块%lu 尺寸", (unsigned long)i])
                     target:self set:nil get:nil detail:nil cell:PSGroupCell edit:nil];
-            if (i == 1) [g2 setProperty:@"X=横向 / Y=竖向，各 4 挡（1~4 格）。换挡即时生效，无需注销。" forKey:@"footerTitle"];
+            if (i == 1) [g2 setProperty:@"X=横向 / Y=竖向，各 4 挡（1~4 格）。换挡即时生效，无需注销。" forKey:@"footerText"];
             [specs addObject:g2];
             [specs addObject:[self sliderForModule:i named:@"X" selBase:@"PortraitW" key:CCVKeyForModule(CCVKeyPortraitW, i) other:CCVKeyForModule(CCVKeyLandscapeW, i)]];
             [specs addObject:[self sliderForModule:i named:@"Y" selBase:@"PortraitH" key:CCVKeyForModule(CCVKeyPortraitH, i) other:CCVKeyForModule(CCVKeyLandscapeH, i)]];
@@ -222,7 +235,7 @@
         NSUInteger idx = [self index];
 
         PSSpecifier *g1 = [PSSpecifier preferenceSpecifierNamed:@"视频素材" target:self set:nil get:nil detail:nil cell:PSGroupCell edit:nil];
-        [g1 setProperty:@"视频会静音循环播放。进入素材库可从相册导入视频、点选或长按删除。" forKey:@"footerTitle"];
+        [g1 setProperty:@"视频会静音循环播放。进入素材库可从相册导入视频、点选或长按删除。" forKey:@"footerText"];
         [specs addObject:g1];
 
         PSSpecifier *lib = [PSSpecifier preferenceSpecifierNamed:@"素材库" target:self set:nil get:nil detail:nil cell:PSButtonCell edit:nil];
@@ -231,13 +244,13 @@
 
         // 模块尺寸：原生分段滑杆（4 挡 + 数值显示）
         PSSpecifier *g2 = [PSSpecifier preferenceSpecifierNamed:@"模块尺寸" target:self set:nil get:nil detail:nil cell:PSGroupCell edit:nil];
-        [g2 setProperty:@"X=横向 / Y=竖向，各 4 挡（1~4 格）。换挡即时生效，无需注销。" forKey:@"footerTitle"];
+        [g2 setProperty:@"X=横向 / Y=竖向，各 4 挡（1~4 格）。换挡即时生效，无需注销。" forKey:@"footerText"];
         [specs addObject:g2];
         [specs addObject:[self sliderNamed:@"X" key:CCVKeyForModule(CCVKeyPortraitW, idx) selBase:@"PortraitW" other:CCVKeyForModule(CCVKeyLandscapeW, idx)]];
         [specs addObject:[self sliderNamed:@"Y" key:CCVKeyForModule(CCVKeyPortraitH, idx) selBase:@"PortraitH" other:CCVKeyForModule(CCVKeyLandscapeH, idx)]];
 
         PSSpecifier *g4 = [PSSpecifier preferenceSpecifierNamed:@"播放" target:self set:nil get:nil detail:nil cell:PSGroupCell edit:nil];
-        [g4 setProperty:@"画面填充：铺满模块（可能裁切）；关闭则完整显示（可能留黑边）。修改尺寸与选择视频即时生效，无需注销。" forKey:@"footerTitle"];
+        [g4 setProperty:@"画面填充：铺满模块（可能裁切）；关闭则完整显示（可能留黑边）。修改尺寸与选择视频即时生效，无需注销。" forKey:@"footerText"];
         [specs addObject:g4];
 
         PSSpecifier *fill = [PSSpecifier preferenceSpecifierNamed:@"画面填充" target:self set:@selector(setFill:forSpecifier:) get:@selector(getFill:) detail:nil cell:PSSwitchCell edit:nil];
