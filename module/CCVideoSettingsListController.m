@@ -329,9 +329,9 @@
     if (!spec || ![spec propertyForKey:@"moduleIndex"]) return nil;
     UIContextualAction *del = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleDestructive
                                                                       title:@"删除"
-                                                                    handler:^(UIContextualAction *action, UIView *view, void (^completion)(BOOL, BOOL)) {
+                                                                    handler:^(UIContextualAction *action, UIView *view, void (^completion)(BOOL)) {
         [self deleteModule:spec];
-        completion(YES, YES);
+        completion(YES);
     }];
     del.backgroundColor = [UIColor systemRedColor];
     UISwipeActionsConfiguration *cfg = [UISwipeActionsConfiguration configurationWithActions:@[del]];
