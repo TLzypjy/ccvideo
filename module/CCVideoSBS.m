@@ -1,6 +1,7 @@
 // SpringBoard 侧助手：不 hook 任何方法，仅监听 Darwin 通知。
 // 收到 SettingsChanged 后比对 MaxModules 与已装模块 bundle 数：
-// 缺少的 CCVideoN.bundle 从 PendingBundles 拷入 ControlCenter/Bundles，然后 exit(0) 注销载入。
+// 缺少的 CCVideoN.bundle 从 PendingBundles 拷入 ControlCenter/Bundles。
+// 不注销——新模块在下一次注销/重启 SpringBoard 时自动载入。
 #import <Foundation/Foundation.h>
 #include <dlfcn.h>
 #include <stdlib.h>
@@ -34,7 +35,6 @@ static void CCVSBNotifyCallback(CFNotificationCenterRef center, void *observer,
         NSString *root = CCVJBRoot();
         NSString *ccDir = [root stringByAppendingPathComponent:@"Library/ControlCenter/Bundles"];
         NSString *pendDir = [root stringByAppendingPathComponent:@"Library/CCVideoPendingBundles"];
-        BOOL changed = NO;
         for (int n = 2; n <= max; n++) {
             NSString *bundleName = [NSString stringWithFormat:@"CCVideo%d.bundle", n];
             NSString *dst = [ccDir stringByAppendingPathComponent:bundleName];
@@ -43,12 +43,12 @@ static void CCVSBNotifyCallback(CFNotificationCenterRef center, void *observer,
             if (![fm fileExistsAtPath:src]) continue;
             NSError *err = nil;
             if ([fm copyItemAtPath:src toPath:dst error:&err]) {
-                changed = YES;
+                NSLog(@"[CCVideoSBS] copied %@ (载入需下次注销)", bundleName);
             } else {
                 NSLog(@"[CCVideoSBS] copy %@ failed: %@", bundleName, err);
             }
         }
-        if (changed) exit(0); // 注销 SpringBoard 载入新模块
+        // 不 exit(0)：按用户要求创建模块不触发注销
     });
 }
 

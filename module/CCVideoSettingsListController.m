@@ -13,19 +13,21 @@
 - (NSMutableArray *)specifiers {
     if (!_specifiers) {
         NSMutableArray *specs = [NSMutableArray array];
-
         NSUInteger n = CCVMaxModules();
+
+        // 小分类：模块行 + 创建模块紧挨着（同一个组）
+        PSSpecifier *g0 = [PSSpecifier preferenceSpecifierNamed:@""
+                target:self set:nil get:nil detail:nil cell:PSGroupCell edit:nil];
+        [g0 setProperty:[NSString stringWithFormat:@"点击模块名可选择该模块播放的视频素材。已创建 %lu / 8 个，新创建的模块将在下次注销后出现在控制中心。",
+                         (unsigned long)n] forKey:@"footerTitle"];
+        [specs addObject:g0];
+
         for (NSUInteger i = 1; i <= n; i++) {
             PSSpecifier *mod = [PSSpecifier preferenceSpecifierNamed:[NSString stringWithFormat:@"视频模块%@", @(i)]
                     target:self set:nil get:nil detail:nil cell:PSLinkCell edit:nil];
             [mod setProperty:@(i) forKey:@"moduleIndex"];
             [specs addObject:mod];
         }
-
-        PSSpecifier *g = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:nil get:nil detail:nil cell:PSGroupCell edit:nil];
-        [g setProperty:[NSString stringWithFormat:@"已创建 %lu / 8 个模块。每个模块在控制中心里独立显示、独立选择视频和尺寸。",
-                        (unsigned long)n] forKey:@"footerTitle"];
-        [specs addObject:g];
 
         if (n < CCV_MAX_MODULES) {
             PSSpecifier *create = [PSSpecifier preferenceSpecifierNamed:@"创建模块"
@@ -34,17 +36,37 @@
             [specs addObject:create];
         }
 
+        // 每个模块的设置内联在主页（模块 1 沿用原分组名，与旧版界面一致）
+        for (NSUInteger i = 1; i <= n; i++) {
+            PSSpecifier *g2 = [PSSpecifier preferenceSpecifierNamed:(i == 1 ? @"模块尺寸" : [NSString stringWithFormat:@"视频模块%lu 尺寸", (unsigned long)i])
+                    target:self set:nil get:nil detail:nil cell:PSGroupCell edit:nil];
+            if (i == 1) [g2 setProperty:@"X=横向 / Y=竖向，各 4 挡（1~4 格）。换挡即时生效，无需注销。" forKey:@"footerTitle"];
+            [specs addObject:g2];
+            [specs addObject:[self sliderForModule:i named:@"X" selBase:@"PortraitW" key:CCVKeyForModule(CCVKeyPortraitW, i) other:CCVKeyForModule(CCVKeyLandscapeW, i)]];
+            [specs addObject:[self sliderForModule:i named:@"Y" selBase:@"PortraitH" key:CCVKeyForModule(CCVKeyPortraitH, i) other:CCVKeyForModule(CCVKeyLandscapeH, i)]];
+
+            PSSpecifier *g4 = [PSSpecifier preferenceSpecifierNamed:(i == 1 ? @"播放" : [NSString stringWithFormat:@"视频模块%lu 播放", (unsigned long)i])
+                    target:self set:nil get:nil detail:nil cell:PSGroupCell edit:nil];
+            if (i == 1) [g4 setProperty:@"画面填充：铺满模块（可能裁切）；关闭则完整显示（可能留黑边）。" forKey:@"footerTitle"];
+            [specs addObject:g4];
+
+            PSSpecifier *fill = [PSSpecifier preferenceSpecifierNamed:(i == 1 ? @"画面填充" : [NSString stringWithFormat:@"视频模块%lu 画面填充", (unsigned long)i])
+                    target:self set:@selector(setFill:forSpecifier:) get:@selector(getFill:) detail:nil cell:PSSwitchCell edit:nil];
+            [fill setProperty:@(i) forKey:@"moduleIndex"];
+            [specs addObject:fill];
+        }
+
         _specifiers = specs;
     }
     return _specifiers;
 }
 
-// 模块行黑字（PSLinkCell）点击 -> 自己解析编号并推入子页
+// 模块行（黑字）点击 -> 直接进入该模块的素材库选素材
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     PSSpecifier *spec = [self specifierAtIndexPath:indexPath];
-    if (spec && [spec.name hasPrefix:@"视频模块"]) {
-        NSUInteger idx = (NSUInteger)[[spec propertyForKey:@"moduleIndex"] integerValue];
-        CCVideoModuleListController *vc = [[CCVideoModuleListController alloc] init];
+    if (spec && [spec propertyForKey:@"moduleIndex"]) {
+        NSUInteger idx = [[spec propertyForKey:@"moduleIndex"] integerValue];
+        CCVideoLibraryViewController *vc = [[CCVideoLibraryViewController alloc] init];
         vc.moduleIndex = idx;
         [self.navigationController pushViewController:vc animated:YES];
         [tableView deselectRowAtIndexPath:indexPath animated:YES];
@@ -53,21 +75,77 @@
     [super tableView:tableView didSelectRowAtIndexPath:indexPath];
 }
 
-// 创建模块：MaxModules+1 -> 通知 SpringBoard 拷贝 bundle 并注销载入
+// 创建模块：直接创建（无弹窗、不注销），SpringBoard 侧只拷贝 bundle，下次注销自动载入
 - (void)createModule:(PSSpecifier *)spec {
     NSUInteger n = CCVMaxModules();
     if (n >= CCV_MAX_MODULES) return;
+    CCVSetMaxModules(n + 1);
+    CCVPostDarwin(CCVDarwinSettingsChanged);
+    _specifiers = nil;
+    [self reloadSpecifiers];
+}
 
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"创建视频模块"
-        message:[NSString stringWithFormat:@"将在控制中心新增视频模块%@，并自动注销一次以载入新模块。", @(n + 1)]
-        preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"创建" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-        CCVSetMaxModules(n + 1);
-        CCVPostDarwin(CCVDarwinSettingsChanged); // SpringBoard 侧据此拷贝 bundle 并注销
-        [self reloadSpecifiers];
-    }]];
-    [self presentViewController:alert animated:YES completion:nil];
+// ---------- 每模块尺寸滑杆（与子页同一套 get/set） ----------
+- (PSSpecifier *)sliderForModule:(NSUInteger)idx named:(NSString *)name selBase:(NSString *)selBase key:(NSString *)key other:(NSString *)other {
+    PSSpecifier *s = [PSSpecifier preferenceSpecifierNamed:name
+                                                    target:self
+                                                      set:NSSelectorFromString([NSString stringWithFormat:@"set%@:forSpecifier:", selBase])
+                                                       get:NSSelectorFromString([NSString stringWithFormat:@"get%@:", selBase])
+                                                    detail:nil
+                                                      cell:PSSliderCell
+                                                       edit:nil];
+    [s setProperty:key forKey:@"key"];
+    [s setProperty:@1 forKey:@"min"];
+    [s setProperty:@4 forKey:@"max"];
+    [s setProperty:@2 forKey:@"defaultValue"];
+    [s setProperty:@YES forKey:@"isSegmented"];
+    [s setProperty:@3 forKey:@"segmentCount"];
+    [s setProperty:@YES forKey:@"showValue"];
+    [s setProperty:other forKey:@"otherKey"];
+    // leftImage 必须是 UIImage 对象（传图片名字符串会让 UISlider setMinimumValueImage: 崩溃）
+    NSString *dirIcon = [selBase isEqualToString:@"PortraitW"] ? @"X" : @"Y";
+    UIImage *dirImg = nil;
+    NSString *iconPath = [[NSBundle bundleForClass:[self class]] pathForResource:dirIcon ofType:@"png"];
+    if (iconPath) dirImg = [UIImage imageWithContentsOfFile:iconPath];
+    if (dirImg) [s setProperty:dirImg forKey:@"leftImage"];
+    return s;
+}
+
+- (id)getPortraitW:(PSSpecifier *)spec  { return @([self sizeForSpecifier:spec]); }
+- (id)getPortraitH:(PSSpecifier *)spec  { return @([self sizeForSpecifier:spec]); }
+
+- (NSInteger)sizeForSpecifier:(PSSpecifier *)spec {
+    NSString *key = [spec propertyForKey:@"key"] ?: CCVKeyPortraitW;
+    NSInteger v = [CCVPrefs() integerForKey:key];
+    if (v <= 0) v = 2;
+    return MIN(MAX(v, (NSInteger)1), (NSInteger)4);
+}
+
+- (void)setPortraitW:(id)value forSpecifier:(PSSpecifier *)spec  { [self saveSize:value spec:spec]; }
+- (void)setPortraitH:(id)value forSpecifier:(PSSpecifier *)spec  { [self saveSize:value spec:spec]; }
+
+- (void)saveSize:(id)value spec:(PSSpecifier *)spec {
+    NSInteger v = [(NSNumber *)value integerValue];
+    v = MIN(MAX(v, (NSInteger)1), (NSInteger)4);
+    NSString *key = [spec propertyForKey:@"key"] ?: CCVKeyPortraitW;
+    NSString *other = [spec propertyForKey:@"otherKey"];
+    [CCVPrefs() setInteger:v forKey:key];
+    if (other.length) [CCVPrefs() setInteger:v forKey:other];
+    CCVPostSizeChange();
+}
+
+// ---------- 每模块画面填充开关 ----------
+- (id)getFill:(PSSpecifier *)spec {
+    NSUInteger idx = [[spec propertyForKey:@"moduleIndex"] integerValue];
+    if (idx == 0) idx = 1;
+    return @([CCVPrefs() boolForKey:CCVKeyForModule(CCVKeyAspectFill, idx)]);
+}
+
+- (void)setFill:(id)value forSpecifier:(PSSpecifier *)spec {
+    NSUInteger idx = [[spec propertyForKey:@"moduleIndex"] integerValue];
+    if (idx == 0) idx = 1;
+    [CCVPrefs() setBool:[(NSNumber *)value boolValue] forKey:CCVKeyForModule(CCVKeyAspectFill, idx)];
+    CCVPostDarwin(CCVDarwinSettingsChanged);
 }
 
 @end
