@@ -40,10 +40,8 @@ static NSString *ccv_resumeName(NSUInteger idx) {
 
 static double ccv_resumeTime(NSUInteger idx) {
     CFPreferencesAppSynchronize((__bridge CFStringRef)CCVBundleID);
-    CFNumberRef n = (__bridge CFNumberRef)CFPreferencesCopyAppValue((__bridge CFStringRef)CCVKeyForModule(kResumeTimeKey, idx), (__bridge CFStringRef)CCVBundleID);
-    double v = 0;
-    if (n) { CFNumberGetValue(n, kCFNumberDoubleType, &v); CFRelease(n); }
-    return v;
+    id v = (__bridge_transfer id)CFPreferencesCopyAppValue((__bridge CFStringRef)CCVKeyForModule(kResumeTimeKey, idx), (__bridge CFStringRef)CCVBundleID);
+    return [v isKindOfClass:[NSNumber class]] ? [(NSNumber *)v doubleValue] : 0.0;
 }
 
 static void ccv_saveResumePrefs(NSString *name, double t, NSUInteger idx) {
@@ -218,7 +216,7 @@ static void ccv_darwin_callback(CFNotificationCenterRef center, void *observer,
         self.player.actionAtItemEnd = AVPlayerActionAtItemEndNone;
         AVPlayerItem *item = [AVPlayerItem playerItemWithURL:[NSURL fileURLWithPath:CCVVideoPathForName(names[0])]];
         if (canResume && [names[0] isEqualToString:savedName]) {
-            [item seekToTime:CMTimeMakeWithSeconds(savedTime, 600) toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero];
+            [item seekToTime:CMTimeMakeWithSeconds(savedTime, 600) toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero completionHandler:nil];
             CCVLog(@"resume: 恢复断点 模块%lu %@ @%.1fs", (unsigned long)self.moduleIndex, savedName, savedTime);
         }
         self.looper = [AVPlayerLooper playerLooperWithPlayer:self.player templateItem:item];
@@ -244,7 +242,7 @@ static void ccv_darwin_callback(CFNotificationCenterRef center, void *observer,
         for (AVPlayerItem *it in items) [self.player insertItem:it afterItem:nil];
         AVPlayerItem *first = self.player.items.firstObject;
         if (canResume && first && [[order firstObject] isEqualToString:savedName]) {
-            [first seekToTime:CMTimeMakeWithSeconds(savedTime, 600) toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero];
+            [first seekToTime:CMTimeMakeWithSeconds(savedTime, 600) toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero completionHandler:nil];
         }
         // 监听播放结束，队尾补播实现无缝循环
         [[NSNotificationCenter defaultCenter] addObserver:self
