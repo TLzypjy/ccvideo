@@ -159,10 +159,14 @@ static void ccv_darwin_callback(CFNotificationCenterRef center, void *observer,
 
     if (mode == 0 || names.count == 1) {
         // 固定（或只有一个素材）：单素材无缝循环
+        // AVPlayerLooper 要求 actionAtItemEnd=None，由 looper 自行接管循环
+        self.player.actionAtItemEnd = AVPlayerActionAtItemEndNone;
         AVPlayerItem *item = [AVPlayerItem playerItemWithURL:[NSURL fileURLWithPath:CCVVideoPathForName(names[0])]];
         self.looper = [AVPlayerLooper playerLooperWithPlayer:self.player templateItem:item];
     } else {
-        // 随机/顺序多素材：整批入队，播完循环（随机模式签名不变时保持同一洗牌序）
+        // 随机/顺序多素材：整批入队，播完自动前进到下一个（Advance），
+        // 队列将空时由 playerItemDidEnd 补一轮实现循环
+        self.player.actionAtItemEnd = AVPlayerActionAtItemEndAdvance;
         NSMutableArray *items = [NSMutableArray array];
         for (NSString *n in names) {
             [items addObject:[AVPlayerItem playerItemWithURL:[NSURL fileURLWithPath:CCVVideoPathForName(n)]]];
@@ -176,19 +180,17 @@ static void ccv_darwin_callback(CFNotificationCenterRef center, void *observer,
     if (self.wantsPlayback) [self.player play];
 }
 
-// 多素材队尾循环：有 item 播完时，若队列快空了就再补一轮（随机模式重新洗牌）
+// 多素材队列循环：队列只剩正在播的这条（播完即空）时补一轮（随机模式重新洗牌）
 - (void)playerItemDidEnd:(NSNotification *)n {
-    if (CCVPlayModeForModule(self.moduleIndex) == 0 || self.player.items.count > 1) return;
+    if (CCVPlayModeForModule(self.moduleIndex) == 0) return; // 固定模式由 looper 接管
+    CCVLog(@"queue: item 播完，剩余%lu 条", (unsigned long)self.player.items.count);
+    if (self.player.items.count > 1) return; // 还有后续，队列自动接播
     NSArray<NSString *> *names = [self currentVideoNames];
     if (names.count < 2) return;
     for (NSString *name in names) {
         [self.player insertItem:[AVPlayerItem playerItemWithURL:[NSURL fileURLWithPath:CCVVideoPathForName(name)]] afterItem:nil];
     }
-    // 若播完的 item 仍卡在队首，前进到新插入的；否则 currentItem 为空，play 自动从队首开始
-    if (self.player.currentItem && self.player.items.firstObject == self.player.currentItem
-        && self.player.items.count > 1) {
-        [self.player advanceToNextItem];
-    }
+    CCVLog(@"queue: 补播一轮（%lu 条），当前模式%ld", (unsigned long)names.count, (long)CCVPlayModeForModule(self.moduleIndex));
     if (self.wantsPlayback) [self.player play];
 }
 
