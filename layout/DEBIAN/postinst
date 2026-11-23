@@ -15,5 +15,11 @@ if [ -n "$JBROOT" ]; then
   chmod 0777 "$JBROOT/Library/ControlCenter/Bundles" 2>/dev/null || true
   chmod 0755 "$JBROOT/Library/CCVideoPendingBundles" 2>/dev/null || true
   chmod -R a+rX "$JBROOT/Library/CCVideoPendingBundles" 2>/dev/null || true
+  # 诊断版：清除旧版残留的 SpringBoard 注入 tweak（改由设置页同步 bundle）。
+  # rootless 在 Library/MobileSubstrate，roothide 在 usr/lib/TweakInject。
+  rm -f "$JBROOT/Library/MobileSubstrate/DynamicLibraries/CCVideoSBS.dylib" 2>/dev/null || true
+  rm -f "$JBROOT/Library/MobileSubstrate/DynamicLibraries/CCVideoSBS.plist" 2>/dev/null || true
+  rm -f "$JBROOT/usr/lib/TweakInject/CCVideoSBS.dylib" 2>/dev/null || true
+  rm -f "$JBROOT/usr/lib/TweakInject/CCVideoSBS.plist" 2>/dev/null || true
 fi
 exit 0
