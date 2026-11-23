@@ -61,8 +61,7 @@ static const char kCCVNameKey = 0;
     [self buildBarTitleView];
     [self.navigationItem setLeftBarButtonItem:[[UIBarButtonItem alloc] initWithTitle:@"关闭"
         style:UIBarButtonItemStylePlain target:self action:@selector(closeTapped)]];
-    [self.navigationItem setRightBarButtonItems:@[[[UIBarButtonItem alloc] initWithTitle:@"导入"
-        style:UIBarButtonItemStylePlain target:self action:@selector(importTapped)]]];
+    [self setupRightButtons];
     [self.view setBackgroundColor:[UIColor colorWithWhite:0.94 alpha:1.0]];
 
     UICollectionViewFlowLayout *flow = [[UICollectionViewFlowLayout alloc] init];
@@ -153,8 +152,7 @@ static const char kCCVNameKey = 0;
     [self stopJiggling];
     _editMode = NO;
     [_editLP setEnabled:YES];
-    [self.navigationItem setRightBarButtonItems:@[[[UIBarButtonItem alloc] initWithTitle:@"导入"
-        style:UIBarButtonItemStylePlain target:self action:@selector(importTapped)]]];
+    [self setupRightButtons];
     [self setBarTitle:[NSString stringWithFormat:@"素材库 (%lu)", (unsigned long)[_videos count]]];
     [_cv reloadData];
 }
@@ -278,13 +276,16 @@ static const char kCCVNameKey = 0;
     [pill addGestureRecognizer:ng];
     objc_setAssociatedObject(ng, &kCCVNameKey, name, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
-    // 选中圆点（编辑态隐藏）
+    // 选中圆点（编辑态隐藏）：固定模式=蓝点单选，随机/顺序=绿点多选（再点一次取消）
     if (!_editMode) {
-        BOOL on = [CCVSelectedVideoNameForModule([self index]) isEqualToString:name];
+        NSInteger mode = CCVPlayModeForModule([self index]);
+        BOOL on = (mode == 0) ? [CCVSelectedVideoNameForModule([self index]) isEqualToString:name]
+                              : CCVListContainsVideo(name, [self index]);
+        UIColor *onColor = (mode == 0) ? [UIColor systemBlueColor] : [UIColor systemGreenColor];
         UIView *dot = [[UIView alloc] initWithFrame:CGRectMake(6 + cardW / 2 - 9, imgH + 33, 18, 18)];
         [[dot layer] setCornerRadius:9.0];
         [[dot layer] setMasksToBounds:YES];
-        [dot setBackgroundColor:on ? [UIColor systemBlueColor] : [UIColor colorWithWhite:0.80 alpha:1.0]];
+        [dot setBackgroundColor:on ? onColor : [UIColor colorWithWhite:0.80 alpha:1.0]];
         [[cell contentView] addSubview:dot];
     }
 
@@ -306,7 +307,15 @@ static const char kCCVNameKey = 0;
 
 - (void)selectVideoNamed:(NSString *)name {
     if (!name || _editMode) return;
-    CCVSetSelectedVideo(name, [self index]);
+    NSUInteger idx = [self index];
+    NSInteger mode = CCVPlayModeForModule(idx);
+    if (mode == 0) {
+        // 固定：单选，覆盖旧值
+        CCVSetSelectedVideo(name, idx);
+    } else {
+        // 随机/顺序：多选，加/删
+        CCVToggleVideoInList(name, idx);
+    }
     CCVPostDarwin(CCVDarwinSettingsChanged);
     [_cv reloadData];
 }
@@ -483,6 +492,59 @@ static const char kCCVNameKey = 0;
     UIAlertController *a = [UIAlertController alertControllerWithTitle:title message:msg preferredStyle:UIAlertControllerStyleAlert];
     [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
     [self presentViewController:a animated:YES completion:nil];
+}
+
+// ---------- 播放模式：固定（单选蓝点）/ 随机、顺序（多选绿点） ----------
+- (void)setupRightButtons {
+    if (_editMode) {
+        [self.navigationItem setRightBarButtonItems:@[[[UIBarButtonItem alloc] initWithTitle:@"完成"
+            style:UIBarButtonItemStylePlain target:self action:@selector(exitEditing)]]];
+        return;
+    }
+    UIBarButtonItem *importItem = [[UIBarButtonItem alloc] initWithTitle:@"导入"
+        style:UIBarButtonItemStylePlain target:self action:@selector(importTapped)];
+    NSInteger mode = CCVPlayModeForModule([self index]);
+    NSString *label = @[@"固定▾", @"随机▾", @"顺序▾"][mode];
+    UIBarButtonItem *modeItem = [[UIBarButtonItem alloc] initWithTitle:label
+        style:UIBarButtonItemStylePlain target:self action:@selector(modeButtonTapped:)];
+    // 右侧从左到右显示顺序 = 数组从后到前；让"导入"在最右，"模式"挨着它左边
+    [self.navigationItem setRightBarButtonItems:@[importItem, modeItem]];
+}
+
+- (void)modeButtonTapped:(UIBarButtonItem *)sender {
+    NSInteger cur = CCVPlayModeForModule([self index]);
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"播放模式"
+        message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    NSArray *titles = @[@"固定播放（单选·蓝点）", @"随机播放（多选·绿点）", @"顺序播放（多选·绿点）"];
+    for (NSInteger i = 0; i < 3; i++) {
+        NSString *t = (i == cur) ? [NSString stringWithFormat:@"✓ %@", titles[i]] : titles[i];
+        UIAlertAction *a = [UIAlertAction actionWithTitle:t style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+            [self setPlayMode:i];
+        }];
+        [sheet addAction:a];
+    }
+    [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    if (sheet.popoverPresentationController) sheet.popoverPresentationController.barButtonItem = sender;
+    [self presentViewController:sheet animated:YES completion:nil];
+}
+
+- (void)setPlayMode:(NSInteger)mode {
+    NSUInteger idx = [self index];
+    NSInteger old = CCVPlayModeForModule(idx);
+    if (old == mode) return;
+    CCVLog(@"playmode: 模块%lu %ld -> %ld", (unsigned long)idx, (long)old, (long)mode);
+    CCVSetPlayMode(mode, idx);
+    // 切换时保留已选素材，避免切过去后一片空白
+    if (mode != 0 && old == 0) {
+        NSString *single = CCVSelectedVideoNameForModule(idx);
+        if (single.length && !CCVListContainsVideo(single, idx)) CCVToggleVideoInList(single, idx);
+    } else if (mode == 0 && old != 0) {
+        NSArray *list = CCVSelectedListForModule(idx);
+        if (list.count) CCVSetSelectedVideo(list[0], idx);
+    }
+    CCVPostDarwin(CCVDarwinSettingsChanged);
+    [self setupRightButtons];
+    [self reloadVideos];
 }
 
 // ---------- 导入（PHPicker，免相册权限） ----------

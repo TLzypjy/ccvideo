@@ -10,10 +10,21 @@
 @property (nonatomic, strong) AVPlayerLooper *looper;
 @property (nonatomic, strong) UIView *videoContainer;
 @property (nonatomic, strong) UILabel *placeholderLabel;
-@property (nonatomic, copy, nullable) NSString *loadedVideoName;
+@property (nonatomic, copy, nullable) NSString *loadedVideoName; // 固定模式当前素材名（去重用）
+@property (nonatomic, copy, nullable) NSString *playlistSignature; // 播放列表签名（模式+文件列表），变了才重建队列
 @property (nonatomic, assign) BOOL wantsPlayback;
 - (void)settingsChanged;
 @end
+
+static NSString *ccv_shuffled(NSArray *items) {
+    // 随机模式： Fisher-Yates 洗牌，返回重新排列的数组
+    NSMutableArray *a = [items mutableCopy];
+    for (NSInteger i = a.count - 1; i > 0; i--) {
+        NSInteger j = arc4random_uniform((uint32_t)(i + 1));
+        [a exchangeObjectAtIndex:i withObjectAtIndex:j];
+    }
+    return a;
+}
 
 static void ccv_darwin_callback(CFNotificationCenterRef center, void *observer,
                                 CFStringRef name, const void *object, CFDictionaryRef userInfo) {
@@ -71,6 +82,7 @@ static void ccv_darwin_callback(CFNotificationCenterRef center, void *observer,
 
 - (void)dealloc {
     CFNotificationCenterRemoveEveryObserver(CFNotificationCenterGetDarwinNotifyCenter(), (__bridge const void *)(self));
+    [[NSNotificationCenter defaultCenter] removeObserver:self name:AVPlayerItemDidPlayToEndTimeNotification object:nil];
     [_looper disableLooping];
 }
 
@@ -100,17 +112,43 @@ static void ccv_darwin_callback(CFNotificationCenterRef center, void *observer,
     self.playerLayer.videoGravity = [self videoGravity];
 }
 
-- (void)loadVideoIfNeeded {
-    NSString *name = CCVSelectedVideoNameForModule(self.moduleIndex);
-    if ([name isEqualToString:self.loadedVideoName ?: @""]) return;
-    self.loadedVideoName = name;
+// 当前模块实际要播的文件名列表（固定=单选；随机/顺序=多选列表）
+- (NSArray<NSString *> *)currentVideoNames {
+    NSInteger mode = CCVPlayModeForModule(self.moduleIndex);
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSArray<NSString *> *names;
+    if (mode == 0) {
+        NSString *n = CCVSelectedVideoNameForModule(self.moduleIndex);
+        names = n.length ? @[n] : @[];
+    } else {
+        names = CCVSelectedListForModule(self.moduleIndex);
+        if (mode == 1) names = ccv_shuffled(names); // 随机模式：打乱顺序
+    }
+    // 只保留真实存在的文件
+    NSMutableArray *valid = [NSMutableArray array];
+    for (NSString *n in names) {
+        if (n.length && [fm fileExistsAtPath:CCVVideoPathForName(n)]) [valid addObject:n];
+    }
+    return valid;
+}
 
+- (void)loadVideoIfNeeded {
+    NSInteger mode = CCVPlayModeForModule(self.moduleIndex);
+    NSArray<NSString *> *names = [self currentVideoNames];
+    // 签名含模式+模式专属选中数据，任一变化都重建
+    NSString *sig = [NSString stringWithFormat:@"%ld|%@", (long)mode,
+                     mode == 0 ? CCVSelectedVideoNameForModule(self.moduleIndex)
+                               : [CCVSelectedListForModule(self.moduleIndex) componentsJoinedByString:@","]];
+    if ([sig isEqualToString:self.playlistSignature ?: @""]) return;
+    self.playlistSignature = sig;
+    self.loadedVideoName = names.firstObject;
+
+    [[NSNotificationCenter defaultCenter] removeObserver:self name:AVPlayerItemDidPlayToEndTimeNotification object:nil];
     [self.looper disableLooping];
     self.looper = nil;
     [self.player removeAllItems];
 
-    NSString *path = CCVVideoPathForName(name);
-    BOOL ok = name.length > 0 && [[NSFileManager defaultManager] fileExistsAtPath:path];
+    BOOL ok = names.count > 0;
     self.videoContainer.hidden = !ok;
     self.placeholderLabel.hidden = ok;
     if (!ok) {
@@ -119,9 +157,33 @@ static void ccv_darwin_callback(CFNotificationCenterRef center, void *observer,
         return;
     }
 
-    AVPlayerItem *item = [AVPlayerItem playerItemWithURL:[NSURL fileURLWithPath:path]];
-    self.looper = [AVPlayerLooper playerLooperWithPlayer:self.player templateItem:item];
+    if (mode == 0 || names.count == 1) {
+        // 固定（或只有一个素材）：单素材无缝循环
+        AVPlayerItem *item = [AVPlayerItem playerItemWithURL:[NSURL fileURLWithPath:CCVVideoPathForName(names[0])]];
+        self.looper = [AVPlayerLooper playerLooperWithPlayer:self.player templateItem:item];
+    } else {
+        // 随机/顺序多素材：整批入队，播完循环（随机模式签名不变时保持同一洗牌序）
+        NSMutableArray *items = [NSMutableArray array];
+        for (NSString *n in names) {
+            [items addObject:[AVPlayerItem playerItemWithURL:[NSURL fileURLWithPath:CCVVideoPathForName(n)]]];
+        }
+        for (AVPlayerItem *it in items) [self.player insertItem:it];
+        // 监听播放结束，队尾补播实现无缝循环
+        [[NSNotificationCenter defaultCenter] addObserver:self
+            selector:@selector(playerItemDidEnd:) name:AVPlayerItemDidPlayToEndTimeNotification object:nil];
+    }
     [self applyDisplayMode];
+    if (self.wantsPlayback) [self.player play];
+}
+
+// 多素材队尾循环：有 item 播完时，若队列快空了就再补一轮（随机模式重新洗牌）
+- (void)playerItemDidEnd:(NSNotification *)n {
+    if (CCVPlayModeForModule(self.moduleIndex) == 0 || self.player.items.count > 1) return;
+    NSArray<NSString *> *names = [self currentVideoNames];
+    if (names.count < 2) return;
+    for (NSString *name in names) {
+        [self.player insertItem:[AVPlayerItem playerItemWithURL:[NSURL fileURLWithPath:CCVVideoPathForName(name)]]];
+    }
     if (self.wantsPlayback) [self.player play];
 }
 
