@@ -40,7 +40,7 @@ static const char kCCVNameKey = 0;
     [l1 setTextColor:[UIColor colorWithWhite:0.0 alpha:1.0]];
     [tv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:CGRectMake(0, 21, 280, 13)];
-    [l2 setText:@"长按进入编辑状态，支持改名 / 删除"];
+    [l2 setText:@"长按改名/删除 · v0.1.27 · 随机/顺序独立列表"];
     [l2 setTextAlignment:NSTextAlignmentCenter];
     [l2 setFont:[UIFont systemFontOfSize:10.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.45 alpha:1.0]];
@@ -59,6 +59,10 @@ static const char kCCVNameKey = 0;
 
 - (void)viewDidLoad {
     [super viewDidLoad];
+    CCVLog(@"Library viewDidLoad v0.1.27（随机/顺序独立列表）；模块%lu 当前模式%ld 随机列表%lu 顺序列表%lu",
+           (unsigned long)[self index], (long)CCVPlayModeForModule([self index]),
+           (unsigned long)[CCVSelectedListForModule([self index], 1) count],
+           (unsigned long)[CCVSelectedListForModule([self index], 2) count]);
     [self buildBarTitleView];
     [self.navigationItem setLeftBarButtonItem:[[UIBarButtonItem alloc] initWithTitle:@"关闭"
         style:UIBarButtonItemStylePlain target:self action:@selector(closeTapped)]];
@@ -554,13 +558,20 @@ static const char kCCVNameKey = 0;
         menuX = MIN(MAX(CGRectGetMidX(ar) - menuW / 2.0, 8.0), CGRectGetWidth([mask bounds]) - menuW - 8.0);
     }
     UIView *menu = [[UIView alloc] initWithFrame:CGRectMake(menuX, menuY, menuW, menuH)];
-    [menu setBackgroundColor:[UIColor colorWithWhite:1.0 alpha:0.94]];
+    [menu setBackgroundColor:[UIColor clearColor]];
     [[menu layer] setCornerRadius:14.0];
     [[menu layer] setShadowColor:[[UIColor blackColor] CGColor]];
-    [[menu layer] setShadowOpacity:0.18];
-    [[menu layer] setShadowRadius:12.0];
+    [[menu layer] setShadowOpacity:0.20];
+    [[menu layer] setShadowRadius:14.0];
     [[menu layer] setShadowOffset:CGSizeMake(0, 4)];
-    [menu setClipsToBounds:YES];
+    // 真·毛玻璃背景（先加，行按钮后加盖在其上）；圆角自裁，menu 本身不裁以免阴影被切
+    UIVisualEffectView *blur = [[UIVisualEffectView alloc] initWithEffect:
+        [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemMaterial]];
+    [blur setFrame:[menu bounds]];
+    [[blur layer] setCornerRadius:14.0];
+    [[blur layer] setMasksToBounds:YES];
+    [blur setUserInteractionEnabled:NO];
+    [menu addSubview:blur];
 
     // 行顺序按图：固定/顺序/随机；tag 用真实 mode（0固定 1随机 2顺序），别直接用行号
     NSArray *titles = @[@"固定显示", @"顺序显示", @"随机显示"];
