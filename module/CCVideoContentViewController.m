@@ -121,7 +121,7 @@ static void ccv_darwin_callback(CFNotificationCenterRef center, void *observer,
         NSString *n = CCVSelectedVideoNameForModule(self.moduleIndex);
         names = n.length ? @[n] : @[];
     } else {
-        names = CCVSelectedListForModule(self.moduleIndex);
+        names = CCVSelectedListForModule(self.moduleIndex, mode); // 随机/顺序各读自己的列表
         if (mode == 1) names = ccv_shuffled(names); // 随机模式：打乱顺序
     }
     // 只保留真实存在的文件
@@ -138,7 +138,7 @@ static void ccv_darwin_callback(CFNotificationCenterRef center, void *observer,
     // 签名含模式+模式专属选中数据，任一变化都重建
     NSString *sig = [NSString stringWithFormat:@"%ld|%@", (long)mode,
                      mode == 0 ? CCVSelectedVideoNameForModule(self.moduleIndex)
-                               : [CCVSelectedListForModule(self.moduleIndex) componentsJoinedByString:@","]];
+                               : [CCVSelectedListForModule(self.moduleIndex, mode) componentsJoinedByString:@","]];
     if ([sig isEqualToString:self.playlistSignature ?: @""]) return;
     self.playlistSignature = sig;
     self.loadedVideoName = names.firstObject;

@@ -212,35 +212,44 @@ void CCVSetPlayMode(NSInteger mode, NSUInteger moduleIndex) {
     [CCVPrefs() synchronize];
 }
 
-NSArray<NSString *> *CCVSelectedListForModule(NSUInteger moduleIndex) {
-    id obj = [CCVPrefs() objectForKey:CCVKeyForModule(CCVKeySelectedList, moduleIndex)];
+// 随机(1)/顺序(2) 各自独立的选中列表键；固定(0)用单选键，不走列表。
+// 旧版只有一份共享列表（无后缀），这里不再读取它——两种模式从各自独立的选择开始。
+static NSString *CCVSelectedListKey(NSUInteger moduleIndex, NSInteger mode) {
+    NSString *base = CCVKeyForModule(CCVKeySelectedList, moduleIndex);
+    NSString *suffix = (mode == 1) ? @"_Random" : (mode == 2) ? @"_Sequential" : @"_Other";
+    return [base stringByAppendingString:suffix];
+}
+
+NSArray<NSString *> *CCVSelectedListForModule(NSUInteger moduleIndex, NSInteger mode) {
+    id obj = [CCVPrefs() objectForKey:CCVSelectedListKey(moduleIndex, mode)];
     if (![obj isKindOfClass:[NSArray class]]) return @[];
     NSMutableArray *out = [NSMutableArray array];
     for (id item in obj) if ([item isKindOfClass:[NSString class]]) [out addObject:item];
     return out;
 }
 
-void CCVSetSelectedList(NSArray<NSString *> *names, NSUInteger moduleIndex) {
-    [CCVPrefs() setObject:(names ?: @[]) forKey:CCVKeyForModule(CCVKeySelectedList, moduleIndex)];
+void CCVSetSelectedList(NSArray<NSString *> *names, NSUInteger moduleIndex, NSInteger mode) {
+    [CCVPrefs() setObject:(names ?: @[]) forKey:CCVSelectedListKey(moduleIndex, mode)];
     [CCVPrefs() synchronize];
 }
 
-BOOL CCVListContainsVideo(NSString *name, NSUInteger moduleIndex) {
+BOOL CCVListContainsVideo(NSString *name, NSUInteger moduleIndex, NSInteger mode) {
     if (!name.length) return NO;
-    return [CCVSelectedListForModule(moduleIndex) containsObject:name];
+    return [CCVSelectedListForModule(moduleIndex, mode) containsObject:name];
 }
 
-void CCVToggleVideoInList(NSString *name, NSUInteger moduleIndex) {
+void CCVToggleVideoInList(NSString *name, NSUInteger moduleIndex, NSInteger mode) {
     if (!name.length) return;
-    NSMutableArray *list = [CCVSelectedListForModule(moduleIndex) mutableCopy];
+    NSMutableArray *list = [CCVSelectedListForModule(moduleIndex, mode) mutableCopy];
+    NSString *modeName = (mode == 1) ? @"随机" : (mode == 2) ? @"顺序" : @"其它";
     if ([list containsObject:name]) {
         [list removeObject:name];
-        CCVLog(@"playlist: 取消 %@（模块%lu，剩%lu）", name, (unsigned long)moduleIndex, (unsigned long)[list count]);
+        CCVLog(@"playlist: 取消 %@（模块%lu %@，剩%lu）", name, (unsigned long)moduleIndex, modeName, (unsigned long)[list count]);
     } else {
         [list addObject:name];
-        CCVLog(@"playlist: 加入 %@（模块%lu，共%lu）", name, (unsigned long)moduleIndex, (unsigned long)[list count]);
+        CCVLog(@"playlist: 加入 %@（模块%lu %@，共%lu）", name, (unsigned long)moduleIndex, modeName, (unsigned long)[list count]);
     }
-    CCVSetSelectedList(list, moduleIndex);
+    CCVSetSelectedList(list, moduleIndex, mode);
 }
 
 NSUInteger CCVSizeForModule(NSString *baseKey, NSUInteger moduleIndex) {

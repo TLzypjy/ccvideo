@@ -281,7 +281,7 @@ static const char kCCVNameKey = 0;
     if (!_editMode) {
         NSInteger mode = CCVPlayModeForModule([self index]);
         BOOL on = (mode == 0) ? [CCVSelectedVideoNameForModule([self index]) isEqualToString:name]
-                              : CCVListContainsVideo(name, [self index]);
+                              : CCVListContainsVideo(name, [self index], mode);
         UIColor *onColor = (mode == 0) ? [UIColor systemBlueColor] : [UIColor systemGreenColor];
         UIView *dot = [[UIView alloc] initWithFrame:CGRectMake(6 + cardW / 2 - 9, imgH + 33, 18, 18)];
         [[dot layer] setCornerRadius:9.0];
@@ -314,8 +314,8 @@ static const char kCCVNameKey = 0;
         // 固定：单选，覆盖旧值
         CCVSetSelectedVideo(name, idx);
     } else {
-        // 随机/顺序：多选，加/删
-        CCVToggleVideoInList(name, idx);
+        // 随机/顺序：多选，加/删（按当前模式写入各自独立的列表）
+        CCVToggleVideoInList(name, idx, mode);
     }
     CCVPostDarwin(CCVDarwinSettingsChanged);
     [_cv reloadData];
@@ -611,14 +611,8 @@ static const char kCCVNameKey = 0;
     if (old == mode) return;
     CCVLog(@"playmode: 模块%lu %ld -> %ld", (unsigned long)idx, (long)old, (long)mode);
     CCVSetPlayMode(mode, idx);
-    // 切换时保留已选素材，避免切过去后一片空白
-    if (mode != 0 && old == 0) {
-        NSString *single = CCVSelectedVideoNameForModule(idx);
-        if (single.length && !CCVListContainsVideo(single, idx)) CCVToggleVideoInList(single, idx);
-    } else if (mode == 0 && old != 0) {
-        NSArray *list = CCVSelectedListForModule(idx);
-        if (list.count) CCVSetSelectedVideo(list[0], idx);
-    }
+    // 三种模式的选中数据各自独立存储：切换时不做任何迁移，
+    // 否则顺序里选的素材会被带到随机（反之亦然）。各模式进去看到的是自己的选择。
     CCVPostDarwin(CCVDarwinSettingsChanged);
     [self setupRightButtons];
     [self reloadVideos];

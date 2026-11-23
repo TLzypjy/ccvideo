@@ -45,11 +45,11 @@ void CCVSetSelectedVideo(NSString *name, NSUInteger moduleIndex);
 // 播放模式：0=固定（单选，蓝点） 1=随机 2=顺序（多选，绿点）
 NSInteger CCVPlayModeForModule(NSUInteger moduleIndex);
 void CCVSetPlayMode(NSInteger mode, NSUInteger moduleIndex);
-// 多素材选中列表（随机/顺序模式用）
-NSArray<NSString *> *CCVSelectedListForModule(NSUInteger moduleIndex);
-void CCVSetSelectedList(NSArray<NSString *> *names, NSUInteger moduleIndex);
-BOOL CCVListContainsVideo(NSString *name, NSUInteger moduleIndex);
-void CCVToggleVideoInList(NSString *name, NSUInteger moduleIndex); // 加/删，返回后可读列表
+// 多素材选中列表（随机 mode=1 / 顺序 mode=2 各自独立存储，互不干扰；固定 mode=0 用单选）
+NSArray<NSString *> *CCVSelectedListForModule(NSUInteger moduleIndex, NSInteger mode);
+void CCVSetSelectedList(NSArray<NSString *> *names, NSUInteger moduleIndex, NSInteger mode);
+BOOL CCVListContainsVideo(NSString *name, NSUInteger moduleIndex, NSInteger mode);
+void CCVToggleVideoInList(NSString *name, NSUInteger moduleIndex, NSInteger mode); // 加/删，返回后可读列表
 NSUInteger CCVSizeForModule(NSString *baseKey, NSUInteger moduleIndex); // 读取并钳位 1~4
 
 // 模块 bundle 同步：把 PendingBundles 里缺失的拷入 ControlCenter/Bundles，
