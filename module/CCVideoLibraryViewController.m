@@ -23,6 +23,7 @@ static const char kCCVNameKey = 0;
     UILabel *_activeLabel;
     NSIndexPath *_activeIp;
     CGFloat _preKbdOY;
+    UIControl *_modeMenu; // 播放模式自定义下拉浮层（含遮罩）
 }
 @end
 
@@ -511,21 +512,97 @@ static const char kCCVNameKey = 0;
     [self.navigationItem setRightBarButtonItems:@[importItem, modeItem]];
 }
 
+// 自定义下拉浮层：圆角毛玻璃卡片 + 三行选项 + 选中打勾，盖在内容上方（非系统弹窗）
+- (void)dismissModeMenu {
+    if (!_modeMenu) return;
+    [UIView animateWithDuration:0.12 animations:^{ [_modeMenu setAlpha:0.0]; }
+        completion:^(BOOL finished) { [_modeMenu removeFromSuperview]; }];
+    _modeMenu = nil;
+}
+
+- (void)modeRowTapped:(UIButton *)btn {
+    NSInteger mode = btn.tag;
+    [self dismissModeMenu];
+    [self setPlayMode:mode];
+}
+
 - (void)modeButtonTapped:(UIBarButtonItem *)sender {
+    if (_modeMenu) { [self dismissModeMenu]; return; }
+
+    UIView *anchor = nil;
+    @try { // 拿到按钮视图用于定位浮层（KVC 私有只读，取不到就走右侧兜底）
+        id barView = [sender valueForKey:@"view"];
+        if ([barView isKindOfClass:[UIView class]]) anchor = barView;
+    } @catch (NSException *e) { anchor = nil; }
+
     NSInteger cur = CCVPlayModeForModule([self index]);
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"播放模式"
-        message:nil preferredStyle:UIAlertControllerStyleActionSheet];
-    NSArray *titles = @[@"固定播放（单选·蓝点）", @"随机播放（多选·绿点）", @"顺序播放（多选·绿点）"];
-    for (NSInteger i = 0; i < 3; i++) {
-        NSString *t = (i == cur) ? [NSString stringWithFormat:@"✓ %@", titles[i]] : titles[i];
-        UIAlertAction *a = [UIAlertAction actionWithTitle:t style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-            [self setPlayMode:i];
-        }];
-        [sheet addAction:a];
+
+    // 遮罩：点空白处关闭
+    UIControl *mask = [[UIControl alloc] initWithFrame:[[self view] bounds]];
+    [mask setBackgroundColor:[UIColor clearColor]];
+    [mask addTarget:self action:@selector(dismissModeMenu) forControlEvents:UIControlEventTouchUpInside];
+
+    CGFloat menuW = 156.0;
+    CGFloat rowH  = 46.0;
+    CGFloat menuH = rowH * 3;
+    // 默认锚在右侧（导入/模式按钮下方），有真实按钮位置时对齐它
+    CGFloat rightPad = 12.0;
+    CGFloat menuX = CGRectGetWidth([mask bounds]) - menuW - rightPad - 52.0;
+    CGFloat menuY = 4.0;
+    if (anchor) {
+        CGRect ar = [anchor convertRect:[anchor bounds] toView:[self view]];
+        menuX = MIN(MAX(CGRectGetMidX(ar) - menuW / 2.0, 8.0), CGRectGetWidth([mask bounds]) - menuW - 8.0);
     }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    if (sheet.popoverPresentationController) sheet.popoverPresentationController.barButtonItem = sender;
-    [self presentViewController:sheet animated:YES completion:nil];
+    UIView *menu = [[UIView alloc] initWithFrame:CGRectMake(menuX, menuY, menuW, menuH)];
+    [menu setBackgroundColor:[UIColor colorWithWhite:1.0 alpha:0.94]];
+    [[menu layer] setCornerRadius:14.0];
+    [[menu layer] setShadowColor:[[UIColor blackColor] CGColor]];
+    [[menu layer] setShadowOpacity:0.18];
+    [[menu layer] setShadowRadius:12.0];
+    [[menu layer] setShadowOffset:CGSizeMake(0, 4)];
+    [menu setClipsToBounds:YES];
+
+    // 行顺序按图：固定/顺序/随机；tag 用真实 mode（0固定 1随机 2顺序），别直接用行号
+    NSArray *titles = @[@"固定显示", @"顺序显示", @"随机显示"];
+    NSArray *rowModes = @[@0, @2, @1];
+    for (NSInteger i = 0; i < 3; i++) {
+        UIButton *row = [UIButton buttonWithType:UIButtonTypeCustom];
+        [row setFrame:CGRectMake(0, i * rowH, menuW, rowH)];
+        [row setTag:[rowModes[i] integerValue]];
+        [row setBackgroundColor:[UIColor clearColor]];
+        [row setTitle:titles[i] forState:UIControlStateNormal];
+        [row setTitleColor:[UIColor colorWithWhite:0.12 alpha:1.0] forState:UIControlStateNormal];
+        [[row titleLabel] setFont:[UIFont systemFontOfSize:15.0]];
+        [row setContentHorizontalAlignment:UIControlContentHorizontalAlignmentLeft];
+        [row setTitleEdgeInsets:UIEdgeInsetsMake(0, 16, 0, 0)];
+        [row addTarget:self action:@selector(modeRowTapped:) forControlEvents:UIControlEventTouchUpInside];
+        [menu addSubview:row];
+
+        if ([rowModes[i] integerValue] == cur) { // 选中项右侧打勾
+            UILabel *check = [[UILabel alloc] initWithFrame:CGRectMake(menuW - 34, i * rowH + 13, 22, 20)];
+            [check setText:@"✓"];
+            [check setFont:[UIFont boldSystemFontOfSize:15.0]];
+            [check setTextColor:[UIColor systemBlueColor]];
+            [check setUserInteractionEnabled:NO];
+            [menu addSubview:check];
+        }
+        if (i < 2) {
+            UIView *sep = [[UIView alloc] initWithFrame:CGRectMake(14, (i + 1) * rowH - 0.5, menuW - 28, 0.5)];
+            [sep setBackgroundColor:[UIColor colorWithWhite:0.0 alpha:0.10]];
+            [sep setUserInteractionEnabled:NO];
+            [menu addSubview:sep];
+        }
+    }
+
+    [mask addSubview:menu];
+    [[self view] addSubview:mask];
+    _modeMenu = mask;
+    [menu setTransform:CGAffineTransformMakeScale(0.88, 0.88)];
+    [menu setAlpha:0.0];
+    [UIView animateWithDuration:0.16 animations:^{
+        [menu setTransform:CGAffineTransformIdentity];
+        [menu setAlpha:1.0];
+    }];
 }
 
 - (void)setPlayMode:(NSInteger)mode {
