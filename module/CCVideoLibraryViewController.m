@@ -40,7 +40,7 @@ static const char kCCVNameKey = 0;
     [l1 setTextColor:[UIColor colorWithWhite:0.0 alpha:1.0]];
     [tv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:CGRectMake(0, 21, 280, 13)];
-    [l2 setText:@"长按改名/删除 · v0.1.27 · 随机/顺序独立列表"];
+    [l2 setText:@"长按改名/删除 · v0.1.29 · 随机/顺序独立列表"];
     [l2 setTextAlignment:NSTextAlignmentCenter];
     [l2 setFont:[UIFont systemFontOfSize:10.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.45 alpha:1.0]];
@@ -59,7 +59,7 @@ static const char kCCVNameKey = 0;
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    CCVLog(@"Library viewDidLoad v0.1.27（随机/顺序独立列表）；模块%lu 当前模式%ld 随机列表%lu 顺序列表%lu",
+    CCVLog(@"Library viewDidLoad v0.1.29（随机/顺序独立列表）；模块%lu 当前模式%ld 随机列表%lu 顺序列表%lu",
            (unsigned long)[self index], (long)CCVPlayModeForModule([self index]),
            (unsigned long)[CCVSelectedListForModule([self index], 1) count],
            (unsigned long)[CCVSelectedListForModule([self index], 2) count]);
@@ -547,7 +547,7 @@ static const char kCCVNameKey = 0;
     [mask setBackgroundColor:[UIColor clearColor]];
     [mask addTarget:self action:@selector(dismissModeMenu) forControlEvents:UIControlEventTouchUpInside];
 
-    CGFloat menuW = 124.0;
+    CGFloat menuW = 112.0;
     CGFloat rowH  = 40.0;
     CGFloat menuH = rowH * 3;
     // 锚在"模式"按钮正下方、右边缘与按钮对齐；拿不到按钮就落在导航栏下方右侧
@@ -583,26 +583,36 @@ static const char kCCVNameKey = 0;
     NSArray *titles = @[@"固定显示", @"顺序显示", @"随机显示"];
     NSArray *rowModes = @[@0, @2, @1];
     for (NSInteger i = 0; i < 3; i++) {
+        NSInteger rowMode = [rowModes[i] integerValue];
         UIButton *row = [UIButton buttonWithType:UIButtonTypeCustom];
         [row setFrame:CGRectMake(0, i * rowH, menuW, rowH)];
-        [row setTag:[rowModes[i] integerValue]];
+        [row setTag:rowMode];
         [row setBackgroundColor:[UIColor clearColor]];
-        [row setTitle:titles[i] forState:UIControlStateNormal];
-        [row setTitleColor:[UIColor colorWithWhite:0.12 alpha:1.0] forState:UIControlStateNormal];
-        [[row titleLabel] setFont:[UIFont systemFontOfSize:15.0]];
+        if (rowMode == cur) {
+            // 勾号拼在文字末尾（紧跟文字），不再固定在浮层最右留一大块空白
+            NSString *checkSuffix = @"  ✓";
+            NSMutableAttributedString *title = [[NSMutableAttributedString alloc] initWithString:
+                [NSString stringWithFormat:@"%@%@", titles[i], checkSuffix]];
+            NSUInteger textLen = [titles[i] length];
+            [title addAttribute:NSFontAttributeName value:[UIFont systemFontOfSize:15.0]
+                          range:NSMakeRange(0, textLen)];
+            [title addAttribute:NSForegroundColorAttributeName value:[UIColor colorWithWhite:0.12 alpha:1.0]
+                          range:NSMakeRange(0, textLen)];
+            [title addAttribute:NSFontAttributeName value:[UIFont boldSystemFontOfSize:15.0]
+                          range:NSMakeRange(textLen, [checkSuffix length])];
+            [title addAttribute:NSForegroundColorAttributeName value:[UIColor systemBlueColor]
+                          range:NSMakeRange(textLen, [checkSuffix length])];
+            [row setAttributedTitle:title forState:UIControlStateNormal];
+        } else {
+            [row setTitle:titles[i] forState:UIControlStateNormal];
+            [row setTitleColor:[UIColor colorWithWhite:0.12 alpha:1.0] forState:UIControlStateNormal];
+            [[row titleLabel] setFont:[UIFont systemFontOfSize:15.0]];
+        }
         [row setContentHorizontalAlignment:UIControlContentHorizontalAlignmentLeft];
         [row setTitleEdgeInsets:UIEdgeInsetsMake(0, 16, 0, 0)];
         [row addTarget:self action:@selector(modeRowTapped:) forControlEvents:UIControlEventTouchUpInside];
         [menu addSubview:row];
 
-        if ([rowModes[i] integerValue] == cur) { // 选中项右侧打勾
-            UILabel *check = [[UILabel alloc] initWithFrame:CGRectMake(menuW - 34, i * rowH + 13, 22, 20)];
-            [check setText:@"✓"];
-            [check setFont:[UIFont boldSystemFontOfSize:15.0]];
-            [check setTextColor:[UIColor systemBlueColor]];
-            [check setUserInteractionEnabled:NO];
-            [menu addSubview:check];
-        }
         if (i < 2) {
             UIView *sep = [[UIView alloc] initWithFrame:CGRectMake(14, (i + 1) * rowH - 0.5, menuW - 28, 0.5)];
             [sep setBackgroundColor:[UIColor colorWithWhite:0.0 alpha:0.10]];
