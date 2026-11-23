@@ -16,7 +16,7 @@
 - (void)settingsChanged;
 @end
 
-static NSString *ccv_shuffled(NSArray *items) {
+static NSArray *ccv_shuffled(NSArray *items) {
     // 随机模式： Fisher-Yates 洗牌，返回重新排列的数组
     NSMutableArray *a = [items mutableCopy];
     for (NSInteger i = a.count - 1; i > 0; i--) {
@@ -167,7 +167,7 @@ static void ccv_darwin_callback(CFNotificationCenterRef center, void *observer,
         for (NSString *n in names) {
             [items addObject:[AVPlayerItem playerItemWithURL:[NSURL fileURLWithPath:CCVVideoPathForName(n)]]];
         }
-        for (AVPlayerItem *it in items) [self.player insertItem:it];
+        for (AVPlayerItem *it in items) [self.player insertItem:it afterItem:nil];
         // 监听播放结束，队尾补播实现无缝循环
         [[NSNotificationCenter defaultCenter] addObserver:self
             selector:@selector(playerItemDidEnd:) name:AVPlayerItemDidPlayToEndTimeNotification object:nil];
@@ -182,7 +182,12 @@ static void ccv_darwin_callback(CFNotificationCenterRef center, void *observer,
     NSArray<NSString *> *names = [self currentVideoNames];
     if (names.count < 2) return;
     for (NSString *name in names) {
-        [self.player insertItem:[AVPlayerItem playerItemWithURL:[NSURL fileURLWithPath:CCVVideoPathForName(name)]]];
+        [self.player insertItem:[AVPlayerItem playerItemWithURL:[NSURL fileURLWithPath:CCVVideoPathForName(name)]] afterItem:nil];
+    }
+    // 若播完的 item 仍卡在队首，前进到新插入的；否则 currentItem 为空，play 自动从队首开始
+    if (self.player.currentItem && self.player.items.firstObject == self.player.currentItem
+        && self.player.items.count > 1) {
+        [self.player advanceToNextItem];
     }
     if (self.wantsPlayback) [self.player play];
 }
