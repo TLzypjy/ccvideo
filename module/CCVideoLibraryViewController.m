@@ -541,25 +541,31 @@ static const char kCCVNameKey = 0;
 
     NSInteger cur = CCVPlayModeForModule([self index]);
 
-    // 遮罩：点空白处关闭
-    UIControl *mask = [[UIControl alloc] initWithFrame:[[self view] bounds]];
+    // 挂到 window：坐标系即屏幕，不会被导航栏裁剪，也不会被 self.view 的偏移顶到状态栏
+    UIView *hostView = [self view].window ?: [self view];
+    UIControl *mask = [[UIControl alloc] initWithFrame:[hostView bounds]];
     [mask setBackgroundColor:[UIColor clearColor]];
     [mask addTarget:self action:@selector(dismissModeMenu) forControlEvents:UIControlEventTouchUpInside];
 
-    CGFloat menuW = 156.0;
-    CGFloat rowH  = 46.0;
+    CGFloat menuW = 124.0;
+    CGFloat rowH  = 40.0;
     CGFloat menuH = rowH * 3;
-    // 默认锚在右侧（导入/模式按钮下方），有真实按钮位置时对齐它
-    CGFloat rightPad = 12.0;
-    CGFloat menuX = CGRectGetWidth([mask bounds]) - menuW - rightPad - 52.0;
-    CGFloat menuY = 4.0;
+    // 锚在"模式"按钮正下方、右边缘与按钮对齐；拿不到按钮就落在导航栏下方右侧
+    CGFloat menuX = CGRectGetWidth([mask bounds]) - menuW - 12.0;
+    CGFloat menuY = 104.0;
     if (anchor) {
-        CGRect ar = [anchor convertRect:[anchor bounds] toView:[self view]];
-        menuX = MIN(MAX(CGRectGetMidX(ar) - menuW / 2.0, 8.0), CGRectGetWidth([mask bounds]) - menuW - 8.0);
+        CGRect ar = [anchor convertRect:[anchor bounds] toView:hostView];
+        if (ar.size.width > 0) {
+            menuX = MIN(MAX(CGRectGetMaxX(ar) - menuW, 8.0), CGRectGetWidth([mask bounds]) - menuW - 8.0);
+            menuY = CGRectGetMaxY(ar) + 8.0;
+        }
     }
+    CCVLog(@"modeMenu: 弹出 x=%.0f y=%.0f w=%.0f h=%.0f anchor=%@ host=%@",
+           (double)menuX, (double)menuY, (double)menuW, (double)menuH,
+           anchor ? @"有" : @"无", [self view].window ? @"window" : @"view");
     UIView *menu = [[UIView alloc] initWithFrame:CGRectMake(menuX, menuY, menuW, menuH)];
     [menu setBackgroundColor:[UIColor clearColor]];
-    [[menu layer] setCornerRadius:14.0];
+    [[menu layer] setCornerRadius:12.0];
     [[menu layer] setShadowColor:[[UIColor blackColor] CGColor]];
     [[menu layer] setShadowOpacity:0.20];
     [[menu layer] setShadowRadius:14.0];
@@ -568,7 +574,7 @@ static const char kCCVNameKey = 0;
     UIVisualEffectView *blur = [[UIVisualEffectView alloc] initWithEffect:
         [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemMaterial]];
     [blur setFrame:[menu bounds]];
-    [[blur layer] setCornerRadius:14.0];
+    [[blur layer] setCornerRadius:12.0];
     [[blur layer] setMasksToBounds:YES];
     [blur setUserInteractionEnabled:NO];
     [menu addSubview:blur];
@@ -606,7 +612,7 @@ static const char kCCVNameKey = 0;
     }
 
     [mask addSubview:menu];
-    [[self view] addSubview:mask];
+    [hostView addSubview:mask];
     _modeMenu = mask;
     [menu setTransform:CGAffineTransformMakeScale(0.88, 0.88)];
     [menu setAlpha:0.0];
