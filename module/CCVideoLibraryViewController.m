@@ -110,6 +110,9 @@ static const char kCCVNameKey = 0;
 
 - (void)reloadVideos {
     _videos = CCVVideoFileNames();
+    NSArray *raw = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:CCVVideoDir error:nil];
+    CCVLog(@"library: reloadVideos 显示=%lu 目录原始=%lu (%@)",
+           (unsigned long)[_videos count], (unsigned long)[raw count], raw);
     [self setBarTitle:[NSString stringWithFormat:@"素材库 (%lu)", (unsigned long)[_videos count]]];
     [_cv reloadData];
 }
@@ -493,26 +496,59 @@ static const char kCCVNameKey = 0;
 }
 
 - (void)picker:(PHPickerViewController *)picker didFinishPicking:(NSArray<PHPickerResult *> *)results {
+    CCVLog(@"import: picker 完成，选中 %lu 个", (unsigned long)[results count]);
     [picker dismissViewControllerAnimated:YES completion:nil];
-    if (results.count == 0) return;
+    if ([results count] == 0) return;
 
     __weak typeof(self) weakSelf = self;
     __block int imported = 0;
+    int pending = 0;
     dispatch_group_t group = dispatch_group_create();
     for (PHPickerResult *result in results) {
         NSItemProvider *provider = result.itemProvider;
-        if (![provider hasItemConformingToTypeIdentifier:@"public.movie"]) continue;
+        CCVLog(@"import: types=%@ suggested=%@", provider.registeredTypeIdentifiers, provider.suggestedName ?: @"nil");
+        // 找可加载的视频类型：优先 public.movie，否则在注册类型里兜底找 movie/mpeg-4/quicktime
+        NSString *type = nil;
+        if ([provider hasItemConformingToTypeIdentifier:@"public.movie"]) {
+            type = @"public.movie";
+        } else {
+            for (NSString *t in provider.registeredTypeIdentifiers) {
+                if ([t containsString:@"movie"] || [t containsString:@"mpeg-4"] || [t containsString:@"quicktime"]) { type = t; break; }
+            }
+        }
+        if (!type) { CCVLog(@"import: 跳过（无视频类型）"); continue; }
         dispatch_group_enter(group);
-        [provider loadFileRepresentationForTypeIdentifier:@"public.movie"
+        pending++;
+        [provider loadFileRepresentationForTypeIdentifier:type
             completionHandler:^(NSURL *url, NSError *error) {
-            if (url && [weakSelf saveImportedVideoFromURL:url suggestedName:provider.suggestedName]) imported++;
+            CCVLog(@"import: load 回调 url=%@ err=%@", url.path ?: @"nil", error);
+            if (url && [weakSelf saveImportedVideoFromURL:url suggestedName:provider.suggestedName]) {
+                imported++;
+            } else {
+                CCVLog(@"import: 保存失败");
+            }
             dispatch_group_leave(group);
         }];
     }
+    if (pending == 0) {
+        CCVLog(@"import: 没有可加载的视频类型");
+        [self showAlert:@"没有可导入的视频" title:@"导入完成"];
+        return;
+    }
+    __block BOOL done = NO;
     dispatch_group_notify(group, dispatch_get_main_queue(), ^{
+        done = YES;
         [weakSelf reloadVideos];
+        CCVLog(@"import: 完成 imported=%d", imported);
         [weakSelf showAlert:(imported > 0 ? [NSString stringWithFormat:@"已导入 %d 个视频到素材库", imported] : @"没有可导入的视频")
                       title:@"导入完成"];
+    });
+    // 兜底：个别视频（iCloud 未下载等）load 回调可能迟迟不来，30 秒后强制刷新界面
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(30 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (!done) {
+            CCVLog(@"import: 30s 超时兜底 reload");
+            [weakSelf reloadVideos];
+        }
     });
 }
 
@@ -533,7 +569,13 @@ static const char kCCVNameKey = 0;
             break;
         }
     }
-    if (!dest || ![fm copyItemAtPath:tmpURL.path toPath:dest error:nil]) return NO;
+    if (!dest) { CCVLog(@"import: 试了 100 个名字都重名，放弃"); return NO; }
+    NSError *cpErr = nil;
+    if (![fm copyItemAtPath:tmpURL.path toPath:dest error:&cpErr]) {
+        CCVLog(@"import: 拷贝失败 %@ -> %@ err=%@", tmpURL.path, dest, cpErr);
+        return NO;
+    }
+    CCVLog(@"import: 已保存到 %@", dest);
 
     AVURLAsset *asset = [AVURLAsset URLAssetWithURL:[NSURL fileURLWithPath:dest] options:nil];
     AVAssetImageGenerator *gen = [AVAssetImageGenerator assetImageGeneratorWithAsset:asset];

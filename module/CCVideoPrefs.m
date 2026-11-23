@@ -211,11 +211,11 @@ NSString *CCVSelectedVideoName(void) {
 NSArray<NSString *> *CCVVideoFileNames(void) {
     NSFileManager *fm = [NSFileManager defaultManager];
     NSArray *items = [fm contentsOfDirectoryAtPath:CCVVideoDir error:nil] ?: @[];
-    NSArray *exts = @[@"mp4", @"mov", @"m4v", @"MP4", @"MOV", @"M4V"];
+    // 素材库目录只放视频，不再按扩展名过滤（以前只认 mp4/mov/m4v，其他扩展名会"文件在但永不显示"）
     NSMutableArray *files = [NSMutableArray array];
     for (NSString *name in items) {
-        NSString *ext = name.pathExtension;
-        if (ext.length && [exts containsObject:ext]) [files addObject:name];
+        if ([name hasPrefix:@"."]) continue; // 跳过隐藏文件
+        [files addObject:name];
     }
     [files sortUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
     return files;
