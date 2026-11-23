@@ -500,7 +500,11 @@ static const char kCCVNameKey = 0;
     [picker dismissViewControllerAnimated:YES completion:nil];
     if ([results count] == 0) return;
 
-    __weak typeof(self) weakSelf = self;
+    // 关键：相册视频加载可能耗时十几秒（iCloud 回源/大文件），这期间用户很可能已经
+    // 返回设置页甚至切换模块，素材库 VC 被 pop 释放。若这里用 weakSelf，回调时 self
+    // 已变 nil，[nil save...] 静默返回 NO —— 视频明明加载成功却"导入失败"。
+    // 因此 block 内强持有 self 直到导入完成，确保保存逻辑一定执行。
+    typeof(self) mySelf = self;
     __block int imported = 0;
     int pending = 0;
     dispatch_group_t group = dispatch_group_create();
@@ -522,7 +526,7 @@ static const char kCCVNameKey = 0;
         [provider loadFileRepresentationForTypeIdentifier:type
             completionHandler:^(NSURL *url, NSError *error) {
             CCVLog(@"import: load 回调 url=%@ err=%@", url.path ?: @"nil", error);
-            if (url && [weakSelf saveImportedVideoFromURL:url suggestedName:provider.suggestedName]) {
+            if (url && [mySelf saveImportedVideoFromURL:url suggestedName:provider.suggestedName]) {
                 imported++;
             } else {
                 CCVLog(@"import: 保存失败");
@@ -538,16 +542,21 @@ static const char kCCVNameKey = 0;
     __block BOOL done = NO;
     dispatch_group_notify(group, dispatch_get_main_queue(), ^{
         done = YES;
-        [weakSelf reloadVideos];
+        [mySelf reloadVideos];
         CCVLog(@"import: 完成 imported=%d", imported);
-        [weakSelf showAlert:(imported > 0 ? [NSString stringWithFormat:@"已导入 %d 个视频到素材库", imported] : @"没有可导入的视频")
-                      title:@"导入完成"];
+        // 页面已被关掉时只提示到日志，避免往已销毁页面 present 弹窗
+        if (mySelf.view.window && mySelf.navigationController) {
+            [mySelf showAlert:(imported > 0 ? [NSString stringWithFormat:@"已导入 %d 个视频到素材库", imported] : @"没有可导入的视频")
+                        title:@"导入完成"];
+        } else {
+            CCVLog(@"import: 页面已关闭，跳过弹窗提示");
+        }
     });
     // 兜底：个别视频（iCloud 未下载等）load 回调可能迟迟不来，30 秒后强制刷新界面
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(30 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (!done) {
             CCVLog(@"import: 30s 超时兜底 reload");
-            [weakSelf reloadVideos];
+            [mySelf reloadVideos];
         }
     });
 }
