@@ -14,6 +14,8 @@
 @property (nonatomic, copy, nullable) NSString *playlistSignature; // 播放列表签名（模式+文件列表），变了才重建队列
 @property (nonatomic, assign) BOOL wantsPlayback;
 - (void)settingsChanged;
+- (void)ccvWindowDetached;  // 视图移出窗口 = 控制中心关闭
+- (void)ccvWindowAttached;  // 视图挂回窗口 = 控制中心打开
 @end
 
 static NSArray *ccv_shuffled(NSArray *items) {
@@ -26,6 +28,46 @@ static NSArray *ccv_shuffled(NSArray *items) {
     return a;
 }
 
+// ---------- 断点续播偏好（每模块） ----------
+static NSString * const kResumeNameKey = @"CCVResumeName"; // 上次暂停时的素材名
+static NSString * const kResumeTimeKey = @"CCVResumeTime"; // 上次暂停时的秒数
+
+static NSString *ccv_resumeName(NSUInteger idx) {
+    CFPreferencesAppSynchronize((__bridge CFStringRef)CCVBundleID);
+    NSString *key = CCVKeyForModule(kResumeNameKey, idx);
+    return (__bridge_transfer NSString *)CFPreferencesCopyAppValue((__bridge CFStringRef)key, (__bridge CFStringRef)CCVBundleID);
+}
+
+static double ccv_resumeTime(NSUInteger idx) {
+    CFPreferencesAppSynchronize((__bridge CFStringRef)CCVBundleID);
+    CFNumberRef n = (__bridge CFNumberRef)CFPreferencesCopyAppValue((__bridge CFStringRef)CCVKeyForModule(kResumeTimeKey, idx), (__bridge CFStringRef)CCVBundleID);
+    double v = 0;
+    if (n) { CFNumberGetValue(n, kCFNumberDoubleType, &v); CFRelease(n); }
+    return v;
+}
+
+static void ccv_saveResumePrefs(NSString *name, double t, NSUInteger idx) {
+    if (name.length == 0) return;
+    CFPreferencesSetAppValue((__bridge CFStringRef)CCVKeyForModule(kResumeNameKey, idx), (__bridge CFTypeRef)name, (__bridge CFStringRef)CCVBundleID);
+    CFNumberRef n = CFNumberCreate(NULL, kCFNumberDoubleType, &t);
+    CFPreferencesSetAppValue((__bridge CFStringRef)CCVKeyForModule(kResumeTimeKey, idx), n, (__bridge CFStringRef)CCVBundleID);
+    CFRelease(n);
+    CFPreferencesAppSynchronize((__bridge CFStringRef)CCVBundleID);
+}
+
+// 根视图：监听窗口挂载/卸载。控制中心关闭时模块视图会被移出窗口（协议回调不保证触发），
+// 这是最可靠的"关闭 CC 暂停 / 打开 CC 播放"信号
+@interface CCVRootView : UIView
+@property (nonatomic, weak) CCVideoContentViewController *owner;
+@end
+@implementation CCVRootView
+- (void)willMoveToWindow:(UIWindow *)newWindow {
+    [super willMoveToWindow:newWindow];
+    if (!newWindow) [self.owner ccvWindowDetached];
+    else [self.owner ccvWindowAttached];
+}
+@end
+
 static void ccv_darwin_callback(CFNotificationCenterRef center, void *observer,
                                 CFStringRef name, const void *object, CFDictionaryRef userInfo) {
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -35,6 +77,14 @@ static void ccv_darwin_callback(CFNotificationCenterRef center, void *observer,
 }
 
 @implementation CCVideoContentViewController
+
+- (void)loadView {
+    // 用自定义根视图，借助 willMoveToWindow 感知控制中心开/关
+    CCVRootView *v = [[CCVRootView alloc] initWithFrame:UIScreen.mainScreen.bounds];
+    v.owner = self;
+    v.backgroundColor = [UIColor clearColor];
+    self.view = v;
+}
 
 - (void)viewDidLoad {
     [super viewDidLoad];
@@ -157,21 +207,45 @@ static void ccv_darwin_callback(CFNotificationCenterRef center, void *observer,
         return;
     }
 
+    // 断点续播：读上次暂停位置（素材名+秒数）
+    NSString *savedName = ccv_resumeName(self.moduleIndex);
+    double savedTime = ccv_resumeTime(self.moduleIndex);
+    BOOL canResume = savedName.length > 0 && savedTime > 0.3 && [names containsObject:savedName];
+
     if (mode == 0 || names.count == 1) {
         // 固定（或只有一个素材）：单素材无缝循环
         // AVPlayerLooper 要求 actionAtItemEnd=None，由 looper 自行接管循环
         self.player.actionAtItemEnd = AVPlayerActionAtItemEndNone;
         AVPlayerItem *item = [AVPlayerItem playerItemWithURL:[NSURL fileURLWithPath:CCVVideoPathForName(names[0])]];
+        if (canResume && [names[0] isEqualToString:savedName]) {
+            [item seekToTime:CMTimeMakeWithSeconds(savedTime, 600) toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero];
+            CCVLog(@"resume: 恢复断点 模块%lu %@ @%.1fs", (unsigned long)self.moduleIndex, savedName, savedTime);
+        }
         self.looper = [AVPlayerLooper playerLooperWithPlayer:self.player templateItem:item];
     } else {
         // 随机/顺序多素材：整批入队，播完自动前进到下一个（Advance），
         // 队列将空时由 playerItemDidEnd 补一轮实现循环
         self.player.actionAtItemEnd = AVPlayerActionAtItemEndAdvance;
+        // 断点续播：把上次暂停的素材排到队首，后续素材按原顺序接在其后
+        NSMutableArray *order = [NSMutableArray arrayWithArray:names];
+        if (canResume) {
+            NSUInteger idx = [order indexOfObject:savedName];
+            if (idx != NSNotFound && idx > 0) {
+                NSArray *head = [order subarrayWithRange:NSMakeRange(0, idx)];
+                [order removeObjectsInRange:NSMakeRange(0, idx)];
+                [order addObjectsFromArray:head];
+            }
+            CCVLog(@"resume: 恢复断点 模块%lu %@ @%.1fs（%lu 条队列）", (unsigned long)self.moduleIndex, savedName, savedTime, (unsigned long)order.count);
+        }
         NSMutableArray *items = [NSMutableArray array];
-        for (NSString *n in names) {
+        for (NSString *n in order) {
             [items addObject:[AVPlayerItem playerItemWithURL:[NSURL fileURLWithPath:CCVVideoPathForName(n)]]];
         }
         for (AVPlayerItem *it in items) [self.player insertItem:it afterItem:nil];
+        AVPlayerItem *first = self.player.items.firstObject;
+        if (canResume && first && [[order firstObject] isEqualToString:savedName]) {
+            [first seekToTime:CMTimeMakeWithSeconds(savedTime, 600) toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero];
+        }
         // 监听播放结束，队尾补播实现无缝循环
         [[NSNotificationCenter defaultCenter] addObserver:self
             selector:@selector(playerItemDidEnd:) name:AVPlayerItemDidPlayToEndTimeNotification object:nil];
@@ -204,12 +278,39 @@ static void ccv_darwin_callback(CFNotificationCenterRef center, void *observer,
 - (void)playIfVisible {
     self.wantsPlayback = YES;
     if (self.videoContainer.hidden) return;
-    [self.player play];
+    [self.player play]; // AVPlayer 暂停后 play 自动从暂停位置继续
+}
+
+// 暂停时记录断点（素材名+秒数），VC 重建后也能恢复
+- (void)saveResumePoint {
+    AVPlayerItem *cur = self.player.currentItem;
+    if (!cur || cur.status != AVPlayerItemStatusReadyToPlay) return;
+    if (![cur.asset isKindOfClass:[AVURLAsset class]]) return;
+    NSURL *url = ((AVURLAsset *)cur.asset).URL;
+    double t = CMTimeGetSeconds(cur.currentTime);
+    if (!url || !(t > 0.3) || !isfinite(t)) return; // 开头位置不用记
+    for (NSString *n in [self currentVideoNames]) {
+        if ([[NSURL fileURLWithPath:CCVVideoPathForName(n)] isEqual:url]) {
+            ccv_saveResumePrefs(n, t, self.moduleIndex);
+            CCVLog(@"resume: 记录断点 模块%lu %@ @%.1fs", (unsigned long)self.moduleIndex, n, t);
+            return;
+        }
+    }
 }
 
 - (void)pausePlayback {
     self.wantsPlayback = NO;
+    [self saveResumePoint];
     [self.player pause];
+}
+
+// ---------- 窗口挂载/卸载（关闭 CC 暂停、打开 CC 续播的可靠信号） ----------
+- (void)ccvWindowDetached {
+    [self pausePlayback];
+}
+
+- (void)ccvWindowAttached {
+    [self playIfVisible];
 }
 
 // ---------- 生命周期：只在可见时播放，省电 ----------
