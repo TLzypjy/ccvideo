@@ -34,13 +34,13 @@ static const char kCCVNameKey = 0;
     UIView *tv = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 280, 38)];
     UILabel *l1 = [[UILabel alloc] initWithFrame:CGRectMake(0, 1, 280, 19)];
     [l1 setTag:990];
-    [l1 setText:@"素材库"];
+    [l1 setText:[NSString stringWithFormat:@"视频模块%lu", (unsigned long)[self index]]];
     [l1 setTextAlignment:NSTextAlignmentCenter];
     [l1 setFont:[UIFont systemFontOfSize:16.0]];
     [l1 setTextColor:[UIColor colorWithWhite:0.0 alpha:1.0]];
     [tv addSubview:l1];
     UILabel *l2 = [[UILabel alloc] initWithFrame:CGRectMake(0, 21, 280, 13)];
-    [l2 setText:@"长按改名/删除 · v0.1.29 · 随机/顺序独立列表"];
+    [l2 setText:@"长按进入编辑状态 支持改名/删除"];
     [l2 setTextAlignment:NSTextAlignmentCenter];
     [l2 setFont:[UIFont systemFontOfSize:10.0]];
     [l2 setTextColor:[UIColor colorWithWhite:0.45 alpha:1.0]];
@@ -59,7 +59,7 @@ static const char kCCVNameKey = 0;
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    CCVLog(@"Library viewDidLoad v0.1.29（随机/顺序独立列表）；模块%lu 当前模式%ld 随机列表%lu 顺序列表%lu",
+    CCVLog(@"Library viewDidLoad v0.1.30；模块%lu 当前模式%ld 随机列表%lu 顺序列表%lu",
            (unsigned long)[self index], (long)CCVPlayModeForModule([self index]),
            (unsigned long)[CCVSelectedListForModule([self index], 1) count],
            (unsigned long)[CCVSelectedListForModule([self index], 2) count]);
@@ -117,7 +117,7 @@ static const char kCCVNameKey = 0;
     NSArray *raw = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:CCVVideoDir error:nil];
     CCVLog(@"library: reloadVideos 显示=%lu 目录原始=%lu (%@)",
            (unsigned long)[_videos count], (unsigned long)[raw count], raw);
-    [self setBarTitle:[NSString stringWithFormat:@"素材库 (%lu)", (unsigned long)[_videos count]]];
+    [self setBarTitle:[NSString stringWithFormat:@"视频模块%lu", (unsigned long)[self index]]];
     [_cv reloadData];
 }
 
@@ -158,7 +158,7 @@ static const char kCCVNameKey = 0;
     _editMode = NO;
     [_editLP setEnabled:YES];
     [self setupRightButtons];
-    [self setBarTitle:[NSString stringWithFormat:@"素材库 (%lu)", (unsigned long)[_videos count]]];
+    [self setBarTitle:[NSString stringWithFormat:@"视频模块%lu", (unsigned long)[self index]]];
     [_cv reloadData];
 }
 
