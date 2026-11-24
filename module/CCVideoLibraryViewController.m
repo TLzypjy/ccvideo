@@ -650,6 +650,11 @@ static const char kCCVNameKey = 0;
     PHPickerConfiguration *config = [[PHPickerConfiguration alloc] init];
     config.filter = [PHPickerFilter videosFilter];
     config.selectionLimit = 0;
+    // 关键：默认 automatic/compatible 模式会让系统对视频实时转码（大视频要几十秒）。
+    // current 模式直接用相册里的原始表示（HEVC 等），AVPlayer 可直接播放，导入快得多。
+    if (@available(iOS 14.0, *)) {
+        config.preferredAssetRepresentationMode = PHPickerConfigurationAssetRepresentationModeCurrent;
+    }
     PHPickerViewController *picker = [[PHPickerViewController alloc] initWithConfiguration:config];
     [picker setDelegate:self];
     [self presentViewController:picker animated:YES completion:nil];
@@ -659,6 +664,9 @@ static const char kCCVNameKey = 0;
     CCVLog(@"import: picker 完成，选中 %lu 个", (unsigned long)[results count]);
     [picker dismissViewControllerAnimated:YES completion:nil];
     if ([results count] == 0) return;
+    // 系统可能要十几秒转码/回源，先给用户一个明确反馈，别以为卡死
+    // （导入完成后 reloadVideos 会把标题恢复成"视频模块N"）
+    [self setBarTitle:@"正在导入…"];
 
     // 关键：相册视频加载可能耗时十几秒（iCloud 回源/大文件），这期间用户很可能已经
     // 返回设置页甚至切换模块，素材库 VC 被 pop 释放。若这里用 weakSelf，回调时 self
@@ -683,11 +691,14 @@ static const char kCCVNameKey = 0;
         if (!type) { CCVLog(@"import: 跳过（无视频类型）"); continue; }
         dispatch_group_enter(group);
         pending++;
+        NSDate *loadStart = [NSDate date];
         [provider loadFileRepresentationForTypeIdentifier:type
             completionHandler:^(NSURL *url, NSError *error) {
-            CCVLog(@"import: load 回调 url=%@ err=%@", url.path ?: @"nil", error);
+            CCVLog(@"import: load 回调耗时%.1fs url=%@ err=%@", -[loadStart timeIntervalSinceNow], url.path ?: @"nil", error);
             if (url && [mySelf saveImportedVideoFromURL:url suggestedName:provider.suggestedName]) {
                 imported++;
+                // 每个视频保存成功就立刻回主线程刷新，用户不用等所有视频都转码完才看到
+                dispatch_async(dispatch_get_main_queue(), ^{ [mySelf reloadVideos]; });
             } else {
                 CCVLog(@"import: 保存失败");
             }
