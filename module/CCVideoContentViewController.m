@@ -12,6 +12,8 @@
 @property (nonatomic, strong) UILabel *placeholderLabel;
 @property (nonatomic, copy, nullable) NSString *loadedVideoName; // 固定模式当前素材名（去重用）
 @property (nonatomic, copy, nullable) NSString *playlistSignature; // 播放列表签名（模式+文件列表），变了才重建队列
+@property (nonatomic, strong, nullable) NSArray<NSString *> *playNames; // 多素材当前播放顺序
+@property (nonatomic, assign) NSUInteger playIndex;                    // 多素材当前播到第几条
 @property (nonatomic, assign) BOOL wantsPlayback;
 - (void)settingsChanged;
 - (void)ccvWindowDetached;  // 视图移出窗口 = 控制中心关闭
@@ -126,6 +128,7 @@ static void ccv_darwin_callback(CFNotificationCenterRef center, void *observer,
                                     NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
 
     [self loadVideoIfNeeded];
+    CCVLog(@"content viewDidLoad v0.1.34 模块%lu", (unsigned long)self.moduleIndex);
 }
 
 - (void)dealloc {
@@ -221,9 +224,9 @@ static void ccv_darwin_callback(CFNotificationCenterRef center, void *observer,
         }
         self.looper = [AVPlayerLooper playerLooperWithPlayer:self.player templateItem:item];
     } else {
-        // 随机/顺序多素材：整批入队，播完自动前进到下一个（Advance），
-        // 队列将空时由 playerItemDidEnd 补一轮实现循环
-        self.player.actionAtItemEnd = AVPlayerActionAtItemEndAdvance;
+        // 随机/顺序多素材：不用 AVQueuePlayer 队列自动前进（实测 item 播完队列不消费，
+        // 导致卡住），改为手动逐条播放：每次只放当前一条，播完通知里主动换下一条
+        self.player.actionAtItemEnd = AVPlayerActionAtItemEndNone;
         // 断点续播：把上次暂停的素材排到队首，后续素材按原顺序接在其后
         NSMutableArray *order = [NSMutableArray arrayWithArray:names];
         if (canResume) {
@@ -233,18 +236,16 @@ static void ccv_darwin_callback(CFNotificationCenterRef center, void *observer,
                 [order removeObjectsInRange:NSMakeRange(0, idx)];
                 [order addObjectsFromArray:head];
             }
-            CCVLog(@"resume: 恢复断点 模块%lu %@ @%.1fs（%lu 条队列）", (unsigned long)self.moduleIndex, savedName, savedTime, (unsigned long)order.count);
+            CCVLog(@"resume: 恢复断点 模块%lu %@ @%.1fs（%lu 条列表）", (unsigned long)self.moduleIndex, savedName, savedTime, (unsigned long)order.count);
         }
-        NSMutableArray *items = [NSMutableArray array];
-        for (NSString *n in order) {
-            [items addObject:[AVPlayerItem playerItemWithURL:[NSURL fileURLWithPath:CCVVideoPathForName(n)]]];
+        self.playNames = order;
+        self.playIndex = 0;
+        AVPlayerItem *item = [AVPlayerItem playerItemWithURL:[NSURL fileURLWithPath:CCVVideoPathForName(order[0])]];
+        if (canResume && [order[0] isEqualToString:savedName]) {
+            [item seekToTime:CMTimeMakeWithSeconds(savedTime, 600) toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero completionHandler:nil];
         }
-        for (AVPlayerItem *it in items) [self.player insertItem:it afterItem:nil];
-        AVPlayerItem *first = self.player.items.firstObject;
-        if (canResume && first && [[order firstObject] isEqualToString:savedName]) {
-            [first seekToTime:CMTimeMakeWithSeconds(savedTime, 600) toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero completionHandler:nil];
-        }
-        // 监听播放结束，队尾补播实现无缝循环
+        [self.player insertItem:item afterItem:nil]; // removeAllItems 后队列为空，只放当前一条
+        // 监听播放结束，播完主动接下一条
         [[NSNotificationCenter defaultCenter] addObserver:self
             selector:@selector(playerItemDidEnd:) name:AVPlayerItemDidPlayToEndTimeNotification object:nil];
     }
@@ -252,17 +253,33 @@ static void ccv_darwin_callback(CFNotificationCenterRef center, void *observer,
     if (self.wantsPlayback) [self.player play];
 }
 
-// 多素材队列循环：队列只剩正在播的这条（播完即空）时补一轮（随机模式重新洗牌）
+// 多素材播放：播完主动替换成下一条（不依赖 AVQueuePlayer 的队列前进）
 - (void)playerItemDidEnd:(NSNotification *)n {
     if (CCVPlayModeForModule(self.moduleIndex) == 0) return; // 固定模式由 looper 接管
-    CCVLog(@"queue: item 播完，剩余%lu 条", (unsigned long)self.player.items.count);
-    if (self.player.items.count > 1) return; // 还有后续，队列自动接播
-    NSArray<NSString *> *names = [self currentVideoNames];
+    if (n.object != self.player.currentItem) return;         // 忽略别的 VC/已被替换的 item 的通知
+    NSArray<NSString *> *names = self.playNames;
     if (names.count < 2) return;
-    for (NSString *name in names) {
-        [self.player insertItem:[AVPlayerItem playerItemWithURL:[NSURL fileURLWithPath:CCVVideoPathForName(name)]] afterItem:nil];
+    NSUInteger next = self.playIndex + 1;
+    if (next >= names.count) {
+        next = 0;
+        if (CCVPlayModeForModule(self.moduleIndex) == 1) {
+            // 随机模式每轮重新洗牌
+            NSMutableArray *shuffled = [names mutableCopy];
+            for (NSInteger i = shuffled.count - 1; i > 0; i--) {
+                NSInteger j = arc4random_uniform((uint32_t)(i + 1));
+                [shuffled exchangeObjectAtIndex:i withObjectAtIndex:j];
+            }
+            names = shuffled;
+            self.playNames = names;
+        }
     }
-    CCVLog(@"queue: 补播一轮（%lu 条），当前模式%ld", (unsigned long)names.count, (long)CCVPlayModeForModule(self.moduleIndex));
+    self.playIndex = next;
+    NSString *name = names[next];
+    AVPlayerItem *item = [AVPlayerItem playerItemWithURL:[NSURL fileURLWithPath:CCVVideoPathForName(name)]];
+    // 只使用 AVQueuePlayer 官方支持的队列操作：清掉播完的，插入下一条
+    [self.player removeAllItems];
+    [self.player insertItem:item afterItem:nil];
+    CCVLog(@"queue: 自动接播下一条 模块%lu %@（%lu/%lu）", (unsigned long)self.moduleIndex, name, (unsigned long)(next + 1), (unsigned long)names.count);
     if (self.wantsPlayback) [self.player play];
 }
 
